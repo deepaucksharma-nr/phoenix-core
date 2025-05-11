@@ -18,4 +18,9 @@ require (
 	go.opentelemetry.io/collector v0.94.0
 )
 
-// Replace directives for custom components will be added once implemented
+// Replace directives for custom components
+replace github.com/deepaucksharma-nr/phoenix-core/internal/extension/pidcontroller => ../internal/extension/pidcontroller
+replace github.com/deepaucksharma-nr/phoenix-core/internal/processor/adaptiveheadsampler => ../internal/processor/adaptiveheadsampler
+replace github.com/deepaucksharma-nr/phoenix-core/internal/processor/reservoirsampler => ../internal/processor/reservoirsampler
+replace github.com/deepaucksharma-nr/phoenix-core/internal/processor/topnprocfilter => ../internal/processor/topnprocfilter
+replace github.com/deepaucksharma-nr/phoenix-core/internal/pkg/samplerregistry => ../internal/pkg/samplerregistry

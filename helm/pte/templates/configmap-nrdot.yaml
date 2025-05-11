@@ -55,6 +55,15 @@ data:
               {{- end }}
       {{- end }}
 
+      {{- if .Values.processMetrics.enabled }}
+      topn_process_metrics_filter:
+        top_n: ${PTE_PROCESS_TOPN_N}
+        cpu_threshold: ${PTE_PROCESS_CPU_THRESHOLD}
+        memory_threshold: ${PTE_PROCESS_MEMORY_THRESHOLD}
+        idle_ttl: ${PTE_PROCESS_IDLE_TTL}
+        registry_id: "proc_top_n"
+      {{- end }}
+
       adaptive_head_sampler:
         initial_probability: ${PTE_SAMPLING_HEAD_P_INIT}
         min_p: ${PTE_SAMPLING_HEAD_P_MIN}

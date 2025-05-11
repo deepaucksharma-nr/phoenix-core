@@ -28,7 +28,7 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD)
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Default target
-all: build
+all: protos build
 
 # Help target
 help:
@@ -105,6 +105,11 @@ docker-build:
 # Push the Docker image to registry
 docker-push:
 	docker push $(IMAGE_REPO):$(IMAGE_TAG)
+
+# Generate protobuf files
+protos:
+	protoc -I=. --go_out=. --go_opt=paths=source_relative \
+		internal/processor/reservoirsampler/spanprotos/span_summary.proto
 
 # Generate and verify SBOM for the Docker image
 sbom:

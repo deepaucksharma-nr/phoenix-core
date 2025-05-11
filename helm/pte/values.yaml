@@ -32,8 +32,12 @@ sampling:
     initialProbability: 0.25
     minProbability: 0.01
     maxProbability: 0.9
-    # For logs, if separate head sampler used:
-    # initialLogProbability: 0.5
+    # Logs sampling configuration
+    logs:
+      enabled: false
+      initialProbability: 0.5
+      minProbability: 0.01
+      maxProbability: 0.9
   tail_reservoir:
     k_size: 5000
     windowSeconds: 60
@@ -49,6 +53,15 @@ sampling:
     aggressiveDropFactor: 0.5 # e.g., p *= 0.5
     aggressiveDropWindowCount: 3 # After 3 high-util windows
 
+## Process metrics filtering
+##
+processMetrics:
+  enabled: false
+  topN: 50 # Number of top processes to retain per dimension
+  cpuThreshold: 0.01 # 1% CPU utilization threshold
+  memoryThreshold: 0.01 # 1% memory utilization threshold
+  idleWindowSeconds: 300 # How long to keep a process after it drops below threshold
+
 ## PII protection configuration
 ##
 pii:
@@ -57,7 +70,8 @@ pii:
   defaultSaltSecret:
     name: "pte-pii-salts"
     key: "DEFAULT_PII_SALT"
-  # multiTenantPiiSaltsEnabled: true # if MT uses distinct salts per field/tenant
+  # External rules CSV configuration
+  # rulesCsvConfigMapName: "pte-pii-rules" # Optional: ConfigMap containing CSV rules
 
 ## Multi-tenant configuration
 ##
@@ -115,10 +129,10 @@ affinity: {}
 ## Extra environment variables
 ##
 extraEnv: []
-  # - name: PID_EWMA_ALPHA
-  #   value: "0.3"
-  # - name: PID_AGGRESSIVE_DROP_FACTOR
-  #   value: "0.5"
+  # - name: PTE_TRACES_SAMPLING_HEAD_P_INIT
+  #   value: "0.25"
+  # - name: PTE_PROCESS_TOPN_N
+  #   value: "50"
 
 ## Extra volumes and mounts
 ##

@@ -11,7 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/deepaucksharma-nr/phoenix-core/internal/pkg/samplerregistry"
+	"github.com/deepaucksharma-nr/phoenix-core/internal/metrics"
+	"github.com/deepaucksharma-nr/phoenix-core/internal/pkg/tunableregistry"
 	"github.com/prometheus/common/expfmt"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/extension"
@@ -29,7 +30,14 @@ type pidControllerExtension struct {
 	lowCount        int
 	queueSizeRegex  *regexp.Regexp
 	queueCapRegex   *regexp.Regexp
-	samplerRegistry *samplerregistry.Registry
+	tunableRegistry *tunableregistry.Registry
+
+	// Metrics
+	metricsRegistry         *metrics.MetricsRegistry
+	metricsTicker           *time.Ticker
+	adjustmentCount         atomic.Int64
+	aggressiveDropCount     atomic.Int64
+	currentQueueUtilization atomic.Float64
 }
 
 // Ensure the extension implements required interfaces
@@ -37,21 +45,21 @@ var _ extension.Extension = (*pidControllerExtension)(nil)
 
 func newPIDController(settings extension.CreateSettings, config component.Config) (extension.Extension, error) {
 	cfg := config.(*Config)
-	
+
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	
+
 	// Prepare HTTP client for metrics scraping
 	httpClient := &http.Client{
 		Timeout: 500 * time.Millisecond, // Short timeout for metrics scraping
 	}
-	
+
 	// Compile regexes for parsing metrics
 	queueSizeRegex := regexp.MustCompile(`otelcol_exporter_queue_size{exporter="([^"]*)"} (\d+)`)
 	queueCapRegex := regexp.MustCompile(`otelcol_exporter_queue_capacity{exporter="([^"]*)"} (\d+)`)
-	
+
 	// Create the controller
 	controller := &pidControllerExtension{
 		config:          cfg,
@@ -60,12 +68,19 @@ func newPIDController(settings extension.CreateSettings, config component.Config
 		stopCh:          make(chan struct{}),
 		queueSizeRegex:  queueSizeRegex,
 		queueCapRegex:   queueCapRegex,
-		samplerRegistry: samplerregistry.GetInstance(),
+		tunableRegistry: tunableregistry.GetInstance(),
+		metricsRegistry: metrics.GetInstance(settings.Logger),
 	}
-	
+
 	// Initialize EWMA with 0
 	controller.ewma.Store(0.0)
-	
+	controller.currentQueueUtilization.Store(0.0)
+
+	// Initialize metrics
+	if err := controller.initMetrics(); err != nil {
+		return nil, fmt.Errorf("failed to initialize metrics: %w", err)
+	}
+
 	controller.logger.Info("PID controller extension created",
 		zap.String("interval", cfg.Interval),
 		zap.Float64("target_high", cfg.TargetQueueUtilizationHigh),
@@ -76,19 +91,60 @@ func newPIDController(settings extension.CreateSettings, config component.Config
 		zap.Float64("aggressive_drop_factor", cfg.AggressiveDropFactor),
 		zap.Int("aggressive_window", cfg.AggressiveDropWindowCount),
 		zap.Strings("exporters", cfg.ExporterNames))
-	
+
 	return controller, nil
+}
+
+// initMetrics initializes the metrics for the PID controller
+func (pc *pidControllerExtension) initMetrics() error {
+	// Queue utilization gauge
+	_, err := pc.metricsRegistry.GetOrCreateGauge(
+		metrics.MetricPTEPIDQueueUtilization,
+		metrics.DescPTEPIDQueueUtilization,
+		metrics.UnitRatio,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Adjustments counter
+	_, err = pc.metricsRegistry.GetOrCreateCounter(
+		metrics.MetricPTEPIDControllerAdjustments,
+		metrics.DescPTEPIDControllerAdjustments,
+		metrics.UnitCount,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Aggressive drop counter
+	_, err = pc.metricsRegistry.GetOrCreateCounter(
+		metrics.MetricPTEPIDAggressiveDropCount,
+		metrics.DescPTEPIDAggressiveDropCount,
+		metrics.UnitCount,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Start implements the extension.Extension interface.
 func (pc *pidControllerExtension) Start(ctx context.Context, host component.Host) error {
 	interval, _ := time.ParseDuration(pc.config.Interval)
 	pc.ticker = time.NewTicker(interval)
-	
+
+	// Start metrics reporting ticker (every 10 seconds)
+	pc.metricsTicker = time.NewTicker(10 * time.Second)
+
 	// Start the control loop
 	go pc.controlLoop()
-	
-	pc.logger.Info("PID controller started")
+
+	// Start metrics reporting loop
+	go pc.reportMetrics()
+
+	pc.logger.Info("PID controller started with metrics reporting")
 	return nil
 }
 
@@ -97,10 +153,64 @@ func (pc *pidControllerExtension) Shutdown(ctx context.Context) error {
 	if pc.ticker != nil {
 		pc.ticker.Stop()
 	}
-	
+
+	if pc.metricsTicker != nil {
+		pc.metricsTicker.Stop()
+	}
+
 	close(pc.stopCh)
 	pc.logger.Info("PID controller stopped")
 	return nil
+}
+
+// reportMetrics periodically reports metrics
+func (pc *pidControllerExtension) reportMetrics() {
+	for {
+		select {
+		case <-pc.metricsTicker.C:
+			// Report queue utilization
+			utilization := pc.currentQueueUtilization.Load()
+			err := pc.metricsRegistry.UpdateGauge(
+				context.Background(),
+				metrics.MetricPTEPIDQueueUtilization,
+				utilization,
+				map[string]string{"extension": "pid_controller"},
+			)
+			if err != nil {
+				pc.logger.Error("Failed to update queue utilization metric", zap.Error(err))
+			}
+
+			// Report adjustments and aggressive drops (if any occurred)
+			adjustments := pc.adjustmentCount.Swap(0)
+			if adjustments > 0 {
+				err = pc.metricsRegistry.UpdateCounter(
+					context.Background(),
+					metrics.MetricPTEPIDControllerAdjustments,
+					float64(adjustments),
+					map[string]string{"extension": "pid_controller"},
+				)
+				if err != nil {
+					pc.logger.Error("Failed to update adjustments metric", zap.Error(err))
+				}
+			}
+
+			aggressiveDrops := pc.aggressiveDropCount.Swap(0)
+			if aggressiveDrops > 0 {
+				err = pc.metricsRegistry.UpdateCounter(
+					context.Background(),
+					metrics.MetricPTEPIDAggressiveDropCount,
+					float64(aggressiveDrops),
+					map[string]string{"extension": "pid_controller"},
+				)
+				if err != nil {
+					pc.logger.Error("Failed to update aggressive drops metric", zap.Error(err))
+				}
+			}
+
+		case <-pc.stopCh:
+			return
+		}
+	}
 }
 
 // controlLoop runs the PID control loop
@@ -123,29 +233,34 @@ func (pc *pidControllerExtension) runControlCycle() {
 		pc.logger.Error("Failed to fetch queue metrics", zap.Error(err))
 		return
 	}
-	
+
+	// Store current utilization for metrics reporting
+	pc.currentQueueUtilization.Store(queueUtilization)
+
 	// Calculate EWMA of queue utilization
 	oldEWMA := pc.ewma.Load().(float64)
 	newEWMA := pc.config.EWMAAlpha*queueUtilization + (1-pc.config.EWMAAlpha)*oldEWMA
 	pc.ewma.Store(newEWMA)
-	
-	// Look up the sampler
-	sampler, exists := pc.samplerRegistry.Lookup(pc.config.SamplerRegistryID)
+
+	// Look up the tunable
+	tunable, exists := pc.tunableRegistry.Lookup(pc.config.SamplerRegistryID)
 	if !exists {
-		pc.logger.Error("Failed to find sampler in registry", zap.String("id", pc.config.SamplerRegistryID))
+		pc.logger.Error("Failed to find tunable in registry", zap.String("id", pc.config.SamplerRegistryID))
 		return
 	}
-	
-	// Get current probability
-	currentP := sampler.GetProbability()
+
+	// Get current probability value
+	currentP := tunable.GetValue("probability")
 	var newP float64
-	
+	madeAdjustment := false
+
 	// Apply control logic
 	if newEWMA > pc.config.TargetQueueUtilizationHigh {
 		// Queue utilization is too high, decrease probability
 		pc.highCount++
 		pc.lowCount = 0
-		
+		madeAdjustment = true
+
 		if pc.highCount >= pc.config.AggressiveDropWindowCount {
 			// Sustained high utilization, apply aggressive drop
 			newP = currentP * pc.config.AggressiveDropFactor
@@ -154,6 +269,9 @@ func (pc *pidControllerExtension) runControlCycle() {
 				zap.Float64("old_p", currentP),
 				zap.Float64("new_p", newP),
 				zap.Int("high_count", pc.highCount))
+
+			// Track aggressive drop for metrics
+			pc.aggressiveDropCount.Add(1)
 		} else {
 			// Normal high utilization, apply normal adjustment
 			newP = currentP * pc.config.AdjustmentFactorDown
@@ -166,7 +284,8 @@ func (pc *pidControllerExtension) runControlCycle() {
 		// Queue utilization is too low, increase probability
 		pc.lowCount++
 		pc.highCount = 0
-		
+		madeAdjustment = true
+
 		newP = currentP * pc.config.AdjustmentFactorUp
 		pc.logger.Info("Increasing sampling probability due to low queue utilization",
 			zap.Float64("utilization", newEWMA),
@@ -181,9 +300,19 @@ func (pc *pidControllerExtension) runControlCycle() {
 			zap.Float64("utilization", newEWMA),
 			zap.Float64("probability", currentP))
 	}
-	
-	// Update the sampler probability
-	sampler.SetProbability(newP)
+
+	// Update the tunable probability value
+	tunable.SetValue("probability", newP)
+
+	// Track adjustment for metrics if we made a change
+	if madeAdjustment {
+		pc.adjustmentCount.Add(1)
+	}
+
+	// Reset highCount after applying aggressive drop to prevent immediate re-triggering
+	if pc.highCount >= pc.config.AggressiveDropWindowCount {
+		pc.highCount = 0
+	}
 }
 
 // fetchQueueUtilization scrapes metrics and calculates queue utilization

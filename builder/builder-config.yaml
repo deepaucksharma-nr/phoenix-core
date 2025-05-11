@@ -35,7 +35,7 @@ modules:
     import: go.opentelemetry.io/collector/extension/filestorage
   - module: github.com/open-telemetry/opentelemetry-collector-contrib/extension/prometheusextension
     import: go.opentelemetry.io/collector/extension/prometheusextension
-  
+
   # Custom Components
   - module: github.com/deepaucksharma-nr/phoenix-core/internal/extension/pidcontroller
     import: github.com/deepaucksharma-nr/phoenix-core/internal/extension/pidcontroller
@@ -43,3 +43,5 @@ modules:
     import: github.com/deepaucksharma-nr/phoenix-core/internal/processor/adaptiveheadsampler
   - module: github.com/deepaucksharma-nr/phoenix-core/internal/processor/reservoirsampler
     import: github.com/deepaucksharma-nr/phoenix-core/internal/processor/reservoirsampler
+  - module: github.com/deepaucksharma-nr/phoenix-core/internal/processor/topnprocfilter
+    import: github.com/deepaucksharma-nr/phoenix-core/internal/processor/topnprocfilter

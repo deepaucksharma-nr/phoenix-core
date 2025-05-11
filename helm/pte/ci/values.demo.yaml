@@ -12,8 +12,33 @@ newRelicLicenseKeySecretName: "nr-license-key"
 sampling:
   head:
     initialProbability: 0.3
+    minProbability: 0.01
+    maxProbability: 0.9
+    logs:
+      enabled: false
+      initialProbability: 0.5
   tail_reservoir:
     k_size: 2000
+    windowSeconds: 60
+    checkpointIntervalSeconds: 10
+  adaptive_controller:
+    enabled: true
+    intervalSeconds: 15
+    targetQueueUtilizationHigh: 0.8
+    targetQueueUtilizationLow: 0.2
+    adjustmentFactorUp: 1.25
+    adjustmentFactorDown: 0.8
+    ewmaAlpha: 0.3
+    aggressiveDropFactor: 0.5
+    aggressiveDropWindowCount: 3
+
+# Process metrics filtering
+processMetrics:
+  enabled: false
+  topN: 50
+  cpuThreshold: 0.5
+  memoryThreshold: 0.5
+  idleWindowSeconds: 300
 
 # Simple PII protection
 pii:
@@ -21,6 +46,8 @@ pii:
   defaultSaltSecret:
     name: "pte-pii-salts"
     key: "DEFAULT_PII_SALT"
+  # Uncomment if using external PII rules
+  # rulesCsvConfigMapName: "pte-pii-rules"
 
 # Enable persistence
 persistence:
@@ -36,3 +63,24 @@ collector:
     requests:
       cpu: 200m
       memory: 256Mi
+
+# Multi-tenant configuration (disabled by default)
+multiTenant:
+  enabled: false
+  # Example tenant config commented out
+  # tenants:
+  # - id: "tenant1"
+  #   name: "Tenant 1"
+  #   licenseKeySecretName: "tenant1-license-key"
+
+# Monitoring configuration
+monitoring:
+  prometheus:
+    enabled: true
+    port: 8888
+  health:
+    enabled: true
+    port: 13133
+  zpages:
+    enabled: true
+    port: 55679

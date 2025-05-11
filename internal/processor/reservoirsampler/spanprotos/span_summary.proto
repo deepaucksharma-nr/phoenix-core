@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package spanprotos;
+
+option go_package = "github.com/deepaucksharma-nr/phoenix-core/internal/processor/reservoirsampler/spanprotos";
+
+// SpanSummary is a lightweight representation of a span for the reservoir
+message SpanSummary {
+  // Required: IDs for referencing
+  bytes trace_id = 1;
+  bytes span_id = 2;
+
+  // Required: Keys for identification
+  string name = 3;
+  string kind = 4;
+  
+  // Optional: Timing information
+  int64 start_time_unix_nano = 5;
+  int64 end_time_unix_nano = 6;
+  
+  // Optional: Service context
+  string service_name = 7;
+  
+  // Optional: Status information
+  int32 status_code = 8;
+  string status_message = 9;
+  
+  // Optional: Parent span ID if available
+  bytes parent_span_id = 10;
+  
+  // Optional: Tenant ID for multi-tenant support
+  string tenant_id = 11;
+}
+
+// SpanSummaryBatch is a batch of SpanSummary objects
+message SpanSummaryBatch {
+  repeated SpanSummary summaries = 1;
+}
+
+// ReservoirCheckpoint represents a complete reservoir checkpoint
+message ReservoirCheckpoint {
+  // Required: Metadata about the checkpoint
+  uint64 total_seen = 1; // n counter
+  int64 window_start_time = 2; // t0 timestamp
+  
+  // Required: Span summaries in the reservoir
+  SpanSummaryBatch spans = 3;
+}

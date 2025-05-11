@@ -4,6 +4,7 @@ import (
 	"github.com/deepaucksharma-nr/phoenix-core/internal/extension/pidcontroller"
 	"github.com/deepaucksharma-nr/phoenix-core/internal/processor/adaptiveheadsampler"
 	"github.com/deepaucksharma-nr/phoenix-core/internal/processor/reservoirsampler"
+	"github.com/deepaucksharma-nr/phoenix-core/internal/processor/topnprocfilter"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/otelcol"
 )
@@ -34,4 +35,5 @@ var (
 	_ = pidcontroller.NewFactory
 	_ = adaptiveheadsampler.NewFactory
 	_ = reservoirsampler.NewFactory
+	_ = topnprocfilter.NewFactory
 )

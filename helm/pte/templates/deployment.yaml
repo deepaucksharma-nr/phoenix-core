@@ -108,6 +108,18 @@ spec:
             - name: PTE_PID_AGGRESSIVE_WINDOW_COUNT
               value: {{ .Values.sampling.adaptive_controller.aggressiveDropWindowCount | quote }}
             {{- end }}
+
+            # Process metrics filtering configuration
+            {{- if .Values.processMetrics.enabled }}
+            - name: PTE_PROCESS_TOPN_N
+              value: {{ .Values.processMetrics.topN | quote }}
+            - name: PTE_PROCESS_CPU_THRESHOLD
+              value: {{ .Values.processMetrics.cpuThreshold | quote }}
+            - name: PTE_PROCESS_MEMORY_THRESHOLD
+              value: {{ .Values.processMetrics.memoryThreshold | quote }}
+            - name: PTE_PROCESS_IDLE_TTL
+              value: {{ .Values.processMetrics.idleWindowSeconds }}s
+            {{- end }}
             
             # Extra environment variables
             {{- with .Values.extraEnv }}
