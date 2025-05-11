@@ -1,0 +1,183 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pte.fullname" . }}-collector-config
+  labels:
+    {{- include "pte.labels" . | nindent 4 }}
+data:
+  collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+
+    processors:
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+
+      k8sattributes:
+        auth_type: serviceAccount
+        passthrough: false
+        filter:
+          node_from_env_var: KUBE_NODE_NAME
+        extract:
+          metadata:
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.deployment.name
+            - k8s.namespace.name
+            - k8s.node.name
+            - k8s.container.name
+
+      resource:
+        attributes:
+        - key: service.name
+          from_attribute: k8s.deployment.name
+          action: upsert
+        - key: telemetry.sdk.name
+          value: pte
+          action: upsert
+
+      {{- if .Values.pii.fieldsToHash }}
+      transform/pii:
+        error_mode: ignore
+        trace_statements:
+          - context: resource
+            statements:
+              {{- range .Values.pii.fieldsToHash }}
+              {{- $saltEnvVar := printf "PII_SALT_%s" (upper (replace "." "_" .)) }}
+              - set(attributes["{{ . }}"], SHA256(Concat([env("{{ $saltEnvVar }}"), attributes["{{ . }}"]], ""))) where IsMatch(attributes["{{ . }}"], ".+") and attributes["{{ . }}"] != nil
+              {{- end }}
+      {{- end }}
+
+      adaptive_head_sampler:
+        initial_probability: ${PTE_SAMPLING_HEAD_P_INIT}
+        min_p: ${PTE_SAMPLING_HEAD_P_MIN}
+        max_p: ${PTE_SAMPLING_HEAD_P_MAX}
+        hash_seed_config: "XORTraceID"
+
+      reservoir_sampler:
+        size_k: ${PTE_SAMPLING_RESERVOIR_K}
+        window_duration: ${PTE_SAMPLING_RESERVOIR_WINDOW}
+        checkpoint_path: "{{ include "pte.dataDir" . }}/reservoir_state.db"
+        checkpoint_interval: ${PTE_SAMPLING_RESERVOIR_CHECKPOINT}
+
+      batch:
+        send_batch_size: 1024
+        timeout: 10s
+
+      {{- if .Values.multiTenant.enabled }}
+      routing:
+        default_exporters: ["otlphttp/newrelic_default"]
+        table:
+          {{- range .Values.multiTenant.tenants }}
+          - value: {{ .id | quote }}
+            exporters: ["otlphttp/{{ .id }}"]
+          {{- end }}
+        attribute_source: resource
+        from_attribute: tenant.id
+      {{- end }}
+
+    exporters:
+      otlphttp/newrelic_default:
+        endpoint: "https://otlp.nr-data.net:4318"
+        headers:
+          api-key: ${NEW_RELIC_LICENSE_KEY}
+        sending_queue:
+          enabled: true
+          storage: file_storage/export_queue
+
+      {{- if .Values.multiTenant.enabled }}
+      {{- range .Values.multiTenant.tenants }}
+      otlphttp/{{ .id }}:
+        endpoint: "https://otlp.nr-data.net:4318"
+        headers:
+          api-key: ${TENANT_LICENSE_KEY_{{ upper .id }}}
+        sending_queue:
+          enabled: true
+          storage: file_storage/export_queue_{{ .id }}
+      {{- end }}
+      {{- end }}
+
+    extensions:
+      health_check:
+        endpoint: "0.0.0.0:{{ .Values.monitoring.health.port }}"
+        
+      pprof:
+        endpoint: "0.0.0.0:1777"
+        
+      zpages:
+        endpoint: "0.0.0.0:{{ .Values.monitoring.zpages.port }}"
+        
+      prometheus:
+        endpoint: "0.0.0.0:{{ .Values.monitoring.prometheus.port }}"
+        
+      file_storage/export_queue:
+        directory: "{{ include "pte.dataDir" . }}/queue"
+
+      {{- if .Values.multiTenant.enabled }}
+      {{- range .Values.multiTenant.tenants }}
+      file_storage/export_queue_{{ .id }}:
+        directory: "{{ include "pte.dataDir" $ }}/queue/{{ .id }}"
+      {{- end }}
+      {{- end }}
+
+      {{- if .Values.sampling.adaptive_controller.enabled }}
+      pid_controller:
+        interval: ${PTE_PID_INTERVAL}
+        target_queue_utilization_high: ${PTE_PID_TARGET_HIGH}
+        target_queue_utilization_low: ${PTE_PID_TARGET_LOW}
+        adjustment_factor_up: ${PTE_PID_ADJUSTMENT_UP}
+        adjustment_factor_down: ${PTE_PID_ADJUSTMENT_DOWN}
+        ewma_alpha: ${PTE_PID_EWMA_ALPHA}
+        aggressive_drop_factor: ${PTE_PID_AGGRESSIVE_DROP_FACTOR}
+        aggressive_drop_window_count: ${PTE_PID_AGGRESSIVE_WINDOW_COUNT}
+        metrics_endpoint: "http://localhost:{{ .Values.monitoring.prometheus.port }}/metrics"
+        exporter_names: ["otlphttp/newrelic_default"]
+        sampler_registry_id: "adaptive_head_sampler"
+      {{- end }}
+
+    service:
+      extensions:
+        - health_check
+        - pprof
+        - zpages
+        - prometheus
+        - file_storage/export_queue
+        {{- if .Values.sampling.adaptive_controller.enabled }}
+        - pid_controller
+        {{- end }}
+        {{- if .Values.multiTenant.enabled }}
+        {{- range .Values.multiTenant.tenants }}
+        - file_storage/export_queue_{{ .id }}
+        {{- end }}
+        {{- end }}
+
+      pipelines:
+        traces/default:
+          receivers: [otlp]
+          processors:
+            - memory_limiter
+            - k8sattributes
+            - resource
+            {{- if .Values.pii.fieldsToHash }}
+            - transform/pii
+            {{- end }}
+            - adaptive_head_sampler
+            - reservoir_sampler
+            - batch
+            {{- if .Values.multiTenant.enabled }}
+            - routing
+            {{- end }}
+          exporters:
+            {{- if .Values.multiTenant.enabled }}
+            {{- range .Values.multiTenant.tenants }}
+            - otlphttp/{{ .id }}
+            {{- end }}
+            {{- end }}
+            - otlphttp/newrelic_default

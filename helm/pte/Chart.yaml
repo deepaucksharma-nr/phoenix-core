@@ -1,0 +1,14 @@
+apiVersion: v2
+name: pte
+description: Phoenix Telemetry Edge (PTE) - Lean NRDoT-Only, Adaptive Dual-Phase Sampling
+type: application
+version: 0.1.0
+appVersion: "v0.1.0"
+keywords:
+  - opentelemetry
+  - telemetry
+  - tracing
+  - monitoring
+maintainers:
+  - name: Phoenix Team
+    email: phoenix-team@yourorg.com

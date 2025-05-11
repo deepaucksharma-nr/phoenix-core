@@ -1,0 +1,126 @@
+## Phoenix Telemetry Edge (PTE) Helm Values
+##
+image:
+  repository: ghcr.io/deepaucksharma-nr/pte-collector
+  tag: v0.1.0
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+## Collector configuration
+##
+collector:
+  replicas: 1
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  terminationGracePeriodSeconds: 45
+
+## New Relic License Key
+##
+newRelicLicenseKeySecretName: "nr-license-key"
+
+## Telemetry sampling configuration
+##
+sampling:
+  head:
+    initialProbability: 0.25
+    minProbability: 0.01
+    maxProbability: 0.9
+    # For logs, if separate head sampler used:
+    # initialLogProbability: 0.5
+  tail_reservoir:
+    k_size: 5000
+    windowSeconds: 60
+    checkpointIntervalSeconds: 10
+  adaptive_controller:
+    enabled: true
+    intervalSeconds: 15
+    targetQueueUtilizationHigh: 0.8
+    targetQueueUtilizationLow: 0.2
+    adjustmentFactorUp: 1.25
+    adjustmentFactorDown: 0.8
+    ewmaAlpha: 0.3 # For queue utilization smoothing
+    aggressiveDropFactor: 0.5 # e.g., p *= 0.5
+    aggressiveDropWindowCount: 3 # After 3 high-util windows
+
+## PII protection configuration
+##
+pii:
+  fieldsToHash: ["user.email", "http.request.header.authorization"] # Example
+  # Default salt if no tenant-specific one is found or MT disabled
+  defaultSaltSecret:
+    name: "pte-pii-salts"
+    key: "DEFAULT_PII_SALT"
+  # multiTenantPiiSaltsEnabled: true # if MT uses distinct salts per field/tenant
+
+## Multi-tenant configuration
+##
+multiTenant:
+  enabled: false
+  # tenants:
+  #  - id: "tenant1"
+  #    name: "Tenant 1"
+  #    licenseKeySecretName: "tenant1-license-key"
+  #  - id: "tenant2"
+  #    name: "Tenant 2"
+  #    licenseKeySecretName: "tenant2-license-key"
+
+## Persistent volume for exporter queue and reservoir checkpoint
+##
+persistence:
+  enabled: true
+  # existingClaim: ""
+  size: 5Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+## Monitoring and health check endpoints
+##
+monitoring:
+  prometheus:
+    enabled: true
+    port: 8888
+  health:
+    enabled: true
+    port: 13133
+  zpages:
+    enabled: true
+    port: 55679
+
+## Network configuration
+##
+service:
+  type: ClusterIP
+  port: 4317
+  httpPort: 4318
+  annotations: {}
+
+## Pod annotations and labels
+##
+podAnnotations: {}
+podLabels: {}
+
+## Node selector and tolerations
+##
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+## Extra environment variables
+##
+extraEnv: []
+  # - name: PID_EWMA_ALPHA
+  #   value: "0.3"
+  # - name: PID_AGGRESSIVE_DROP_FACTOR
+  #   value: "0.5"
+
+## Extra volumes and mounts
+##
+extraVolumes: []
+extraVolumeMounts: []

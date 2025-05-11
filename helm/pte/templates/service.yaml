@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pte.fullname" . }}
+  labels:
+    {{- include "pte.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: otlp-grpc
+      protocol: TCP
+      name: otlp-grpc
+    - port: {{ .Values.service.httpPort }}
+      targetPort: otlp-http
+      protocol: TCP
+      name: otlp-http
+    {{- if .Values.monitoring.prometheus.enabled }}
+    - port: {{ .Values.monitoring.prometheus.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+    {{- end }}
+    {{- if .Values.monitoring.health.enabled }}
+    - port: {{ .Values.monitoring.health.port }}
+      targetPort: health
+      protocol: TCP
+      name: health
+    {{- end }}
+    {{- if .Values.monitoring.zpages.enabled }}
+    - port: {{ .Values.monitoring.zpages.port }}
+      targetPort: zpages
+      protocol: TCP
+      name: zpages
+    {{- end }}
+  selector:
+    {{- include "pte.selectorLabels" . | nindent 4 }}

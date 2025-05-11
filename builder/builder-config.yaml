@@ -1,0 +1,45 @@
+dist:
+  name: ghcr.io/deepaucksharma-nr/pte-collector
+  version: v0.1.0
+  output_path: ./bin/pte-collector
+
+go:
+  version: "1.22"
+
+modules:
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/otlpreceiver
+    import: go.opentelemetry.io/collector/receiver/otlpreceiver
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension
+    import: go.opentelemetry.io/collector/extension/healthcheckextension
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/extension/pprofextension
+    import: go.opentelemetry.io/collector/extension/pprofextension
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/extension/zpagesextension
+    import: go.opentelemetry.io/collector/extension/zpagesextension
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/extension/ballastextension
+    import: go.opentelemetry.io/collector/extension/ballastextension
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/processor/memorylimiterprocessor
+    import: go.opentelemetry.io/collector/processor/memorylimiterprocessor
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor
+    import: go.opentelemetry.io/collector/processor/k8sattributesprocessor
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor
+    import: go.opentelemetry.io/collector/processor/resourceprocessor
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor
+    import: go.opentelemetry.io/collector/processor/transformprocessor
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/processor/batchprocessor
+    import: go.opentelemetry.io/collector/processor/batchprocessor
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/otlphttpexporter
+    import: go.opentelemetry.io/collector/exporter/otlphttpexporter
+  - module: github.com/newrelic/newrelic-opentelemetry-collector
+    import: github.com/newrelic/newrelic-opentelemetry-collector
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage
+    import: go.opentelemetry.io/collector/extension/filestorage
+  - module: github.com/open-telemetry/opentelemetry-collector-contrib/extension/prometheusextension
+    import: go.opentelemetry.io/collector/extension/prometheusextension
+  
+  # Custom Components
+  - module: github.com/deepaucksharma-nr/phoenix-core/internal/extension/pidcontroller
+    import: github.com/deepaucksharma-nr/phoenix-core/internal/extension/pidcontroller
+  - module: github.com/deepaucksharma-nr/phoenix-core/internal/processor/adaptiveheadsampler
+    import: github.com/deepaucksharma-nr/phoenix-core/internal/processor/adaptiveheadsampler
+  - module: github.com/deepaucksharma-nr/phoenix-core/internal/processor/reservoirsampler
+    import: github.com/deepaucksharma-nr/phoenix-core/internal/processor/reservoirsampler

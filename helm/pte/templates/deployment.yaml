@@ -1,0 +1,181 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "pte.fullname" . }}
+  labels:
+    {{- include "pte.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.collector.replicas }}
+  selector:
+    matchLabels:
+      {{- include "pte.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "pte.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.collector.terminationGracePeriodSeconds }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            # License key variables
+            - name: NEW_RELIC_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.newRelicLicenseKeySecretName }}
+                  key: license-key
+            
+            # Multi-tenant license keys
+            {{- if .Values.multiTenant.enabled }}
+            {{- range .Values.multiTenant.tenants }}
+            - name: TENANT_LICENSE_KEY_{{ upper .id }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .licenseKeySecretName }}
+                  key: license-key
+            {{- end }}
+            {{- end }}
+            
+            # PII salt variables
+            {{- if .Values.pii.fieldsToHash }}
+            {{- range .Values.pii.fieldsToHash }}
+            {{- $saltEnvVar := printf "PII_SALT_%s" (upper (replace "." "_" .)) }}
+            - name: {{ $saltEnvVar }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.pii.defaultSaltSecret.name }}
+                  key: {{ $.Values.pii.defaultSaltSecret.key }}
+            {{- end }}
+            {{- end }}
+            
+            # Kubernetes node name
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            
+            # Sampling configuration
+            - name: PTE_SAMPLING_HEAD_P_INIT
+              value: {{ .Values.sampling.head.initialProbability | quote }}
+            - name: PTE_SAMPLING_HEAD_P_MIN 
+              value: {{ .Values.sampling.head.minProbability | quote }}
+            - name: PTE_SAMPLING_HEAD_P_MAX
+              value: {{ .Values.sampling.head.maxProbability | quote }}
+            - name: PTE_SAMPLING_RESERVOIR_K
+              value: {{ .Values.sampling.tail_reservoir.k_size | quote }}
+            - name: PTE_SAMPLING_RESERVOIR_WINDOW
+              value: {{ .Values.sampling.tail_reservoir.windowSeconds }}s
+            - name: PTE_SAMPLING_RESERVOIR_CHECKPOINT
+              value: {{ .Values.sampling.tail_reservoir.checkpointIntervalSeconds }}s
+            
+            # PID controller configuration
+            {{- if .Values.sampling.adaptive_controller.enabled }}
+            - name: PTE_PID_INTERVAL
+              value: {{ .Values.sampling.adaptive_controller.intervalSeconds }}s
+            - name: PTE_PID_TARGET_HIGH
+              value: {{ .Values.sampling.adaptive_controller.targetQueueUtilizationHigh | quote }}
+            - name: PTE_PID_TARGET_LOW
+              value: {{ .Values.sampling.adaptive_controller.targetQueueUtilizationLow | quote }}
+            - name: PTE_PID_ADJUSTMENT_UP
+              value: {{ .Values.sampling.adaptive_controller.adjustmentFactorUp | quote }}
+            - name: PTE_PID_ADJUSTMENT_DOWN
+              value: {{ .Values.sampling.adaptive_controller.adjustmentFactorDown | quote }}
+            - name: PTE_PID_EWMA_ALPHA
+              value: {{ .Values.sampling.adaptive_controller.ewmaAlpha | quote }}
+            - name: PTE_PID_AGGRESSIVE_DROP_FACTOR
+              value: {{ .Values.sampling.adaptive_controller.aggressiveDropFactor | quote }}
+            - name: PTE_PID_AGGRESSIVE_WINDOW_COUNT
+              value: {{ .Values.sampling.adaptive_controller.aggressiveDropWindowCount | quote }}
+            {{- end }}
+            
+            # Extra environment variables
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+            - name: health
+              containerPort: {{ .Values.monitoring.health.port }}
+              protocol: TCP
+            {{- if .Values.monitoring.prometheus.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.monitoring.prometheus.port }}
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.monitoring.zpages.enabled }}
+            - name: zpages
+              containerPort: {{ .Values.monitoring.zpages.port }}
+              protocol: TCP
+            {{- end }}
+            
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            
+          resources:
+            {{- toYaml .Values.collector.resources | nindent 12 }}
+            
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol-contrib/
+            - name: data
+              mountPath: {{ include "pte.dataDir" . }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "pte.fullname" . }}-collector-config
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            {{- if .Values.persistence.existingClaim }}
+            claimName: {{ .Values.persistence.existingClaim }}
+            {{- else }}
+            claimName: {{ include "pte.fullname" . }}-data
+            {{- end }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

@@ -1,0 +1,42 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Phoenix Telemetry Edge (PTE) v0.1 — Lean NRDoT-Only, Adaptive Dual‐Phase Sampling
+
+Your PTE collector has been deployed with the following configuration:
+- Head Sampling: Initial probability {{ .Values.sampling.head.initialProbability }}, adaptive range {{ .Values.sampling.head.minProbability }}-{{ .Values.sampling.head.maxProbability }}
+- Reservoir Sampling: k={{ .Values.sampling.tail_reservoir.k_size }}, window={{ .Values.sampling.tail_reservoir.windowSeconds }}s
+{{- if .Values.sampling.adaptive_controller.enabled }}
+- PID Controller: Enabled with interval={{ .Values.sampling.adaptive_controller.intervalSeconds }}s
+{{- else }}
+- PID Controller: Disabled
+{{- end }}
+{{- if .Values.multiTenant.enabled }}
+- Multi-Tenant Mode: Enabled with {{ len .Values.multiTenant.tenants }} tenants
+{{- else }}
+- Multi-Tenant Mode: Disabled
+{{- end }}
+{{- if .Values.pii.fieldsToHash }}
+- PII Protection: Enabled for {{ len .Values.pii.fieldsToHash }} fields
+{{- else }}
+- PII Protection: Disabled
+{{- end }}
+
+To verify the deployment:
+
+1. Check the collector status:
+   kubectl get pods -l app.kubernetes.io/name={{ include "pte.name" . }}
+
+2. Access the health check endpoint:
+   kubectl port-forward svc/{{ include "pte.fullname" . }} {{ .Values.monitoring.health.port }}:{{ .Values.monitoring.health.port }} &
+   curl http://localhost:{{ .Values.monitoring.health.port }}/
+
+3. View collector metrics (if Prometheus is enabled):
+   kubectl port-forward svc/{{ include "pte.fullname" . }} {{ .Values.monitoring.prometheus.port }}:{{ .Values.monitoring.prometheus.port }} &
+   curl http://localhost:{{ .Values.monitoring.prometheus.port }}/metrics
+
+4. Send test telemetry:
+   Sample OTLP data can be sent to:
+   - OTLP/gRPC: {{ include "pte.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+   - OTLP/HTTP: {{ include "pte.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.httpPort }}
+
+For more information, see the documentation at https://github.com/deepaucksharma-nr/phoenix-core/docs
