@@ -3,8 +3,8 @@ package metrics
 import (
 	"context"
 	"sync"
+	"time"
 
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.uber.org/zap"
@@ -25,8 +25,8 @@ const (
 // MetricsRegistry is a registry for custom PTE metrics.
 type MetricsRegistry struct {
 	sync.RWMutex
-	meters         map[string]component.MeterProvider
-	metricsMap     map[string]interface{} // Map of metric names to their instances
+	meters         map[string]*MockMeterProvider // Using our mock implementation
+	metricsMap     map[string]interface{}        // Map of metric names to their instances
 	logger         *zap.Logger
 	metricsBatches []pmetric.Metrics
 }
@@ -34,7 +34,7 @@ type MetricsRegistry struct {
 // NewMetricsRegistry creates a new metrics registry.
 func NewMetricsRegistry(logger *zap.Logger) *MetricsRegistry {
 	return &MetricsRegistry{
-		meters:     make(map[string]component.MeterProvider),
+		meters:     make(map[string]*MockMeterProvider),
 		metricsMap: make(map[string]interface{}),
 		logger:     logger,
 	}
@@ -54,14 +54,14 @@ func GetInstance(logger *zap.Logger) *MetricsRegistry {
 }
 
 // RegisterMeter registers a meter provider with the registry.
-func (r *MetricsRegistry) RegisterMeter(name string, meter component.MeterProvider) {
+func (r *MetricsRegistry) RegisterMeter(name string, meter *MockMeterProvider) {
 	r.Lock()
 	defer r.Unlock()
 	r.meters[name] = meter
 }
 
 // GetMeter returns a meter provider from the registry.
-func (r *MetricsRegistry) GetMeter(name string) (component.MeterProvider, bool) {
+func (r *MetricsRegistry) GetMeter(name string) (*MockMeterProvider, bool) {
 	r.RLock()
 	defer r.RUnlock()
 	meter, ok := r.meters[name]
@@ -159,7 +159,7 @@ func (r *MetricsRegistry) UpdateGauge(ctx context.Context, name string, value fl
 	
 	gauge := metric.(pmetric.Gauge)
 	dp := gauge.DataPoints().AppendEmpty()
-	dp.SetTimestamp(pcommon.NewTimestampFromTime(pcommon.NewTimestampFromTime(pcommon.Timestamp(0)).AsTime()))
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
 	dp.SetDoubleValue(value)
 	
 	// Add attributes
@@ -183,7 +183,7 @@ func (r *MetricsRegistry) UpdateCounter(ctx context.Context, name string, value 
 	
 	sum := metric.(pmetric.Sum)
 	dp := sum.DataPoints().AppendEmpty()
-	dp.SetTimestamp(pcommon.NewTimestampFromTime(pcommon.NewTimestampFromTime(pcommon.Timestamp(0)).AsTime()))
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
 	dp.SetDoubleValue(value)
 	
 	// Add attributes
@@ -207,7 +207,7 @@ func (r *MetricsRegistry) UpdateHistogram(ctx context.Context, name string, valu
 	
 	histogram := metric.(pmetric.Histogram)
 	dp := histogram.DataPoints().AppendEmpty()
-	dp.SetTimestamp(pcommon.NewTimestampFromTime(pcommon.NewTimestampFromTime(pcommon.Timestamp(0)).AsTime()))
+	dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
 	dp.SetCount(1)
 	dp.SetSum(value)
 	

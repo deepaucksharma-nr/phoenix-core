@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/processor"
 )
 
 // Config defines configuration for the topn process metrics filter processor.

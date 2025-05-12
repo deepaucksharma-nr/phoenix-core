@@ -6,7 +6,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 )
 
@@ -64,8 +63,17 @@ func (tp *topNProcessor) processMetricsConcurrent(ctx context.Context, md pmetri
 			resource := rm.Resource()
 			
 			// Extract process info from resource attributes
-			pid := resource.Attributes().GetStr("process.pid")
-			processName := resource.Attributes().GetStr("process.executable.name")
+			pidVal, ok := resource.Attributes().Get("process.pid")
+			pid := ""
+			if ok {
+				pid = pidVal.Str()
+			}
+
+			processNameVal, ok := resource.Attributes().Get("process.executable.name")
+			processName := ""
+			if ok {
+				processName = processNameVal.Str()
+			}
 			
 			// If not a process metric, just note that no update is needed
 			if pid == "" || processName == "" {
@@ -160,7 +168,7 @@ func (tp *topNProcessor) processMetricsConcurrent(ctx context.Context, md pmetri
 	}
 	
 	// Apply top-N filtering - this will also update/use the cache
-	topN := tp.getTopNProcesses() // Cache is updated inside this function
+	_ = tp.getTopNProcesses() // Cache is updated inside this function
 	
 	// Filter the original metrics to only include top-N processes - do this concurrently too
 	resourceMetrics = md.ResourceMetrics()
@@ -188,7 +196,11 @@ func (tp *topNProcessor) processMetricsConcurrent(ctx context.Context, md pmetri
 			resource := rm.Resource()
 	
 			// Extract process info from resource attributes
-			pid := resource.Attributes().GetStr("process.pid")
+			pidVal, ok := resource.Attributes().Get("process.pid")
+			pid := ""
+			if ok {
+				pid = pidVal.Str()
+			}
 	
 			// If not a process metric or is in top-N, include it
 			if pid == "" || tp.isInTopN(pid) {
@@ -230,8 +242,17 @@ func (tp *topNProcessor) processMetricsSequential(ctx context.Context, md pmetri
 		resource := rm.Resource()
 		
 		// Extract process info from resource attributes
-		pid := resource.Attributes().GetStr("process.pid")
-		processName := resource.Attributes().GetStr("process.executable.name")
+		pidVal, ok := resource.Attributes().Get("process.pid")
+		pid := ""
+		if ok {
+			pid = pidVal.Str()
+		}
+
+		processNameVal, ok := resource.Attributes().Get("process.executable.name")
+		processName := ""
+		if ok {
+			processName = processNameVal.Str()
+		}
 		
 		// Skip if not a process metric
 		if pid == "" || processName == "" {
@@ -304,7 +325,7 @@ func (tp *topNProcessor) processMetricsSequential(ctx context.Context, md pmetri
 	}
 	
 	// Apply top-N filtering - this will also update/use the cache
-	topN := tp.getTopNProcesses() // Cache is updated inside this function
+	_ = tp.getTopNProcesses() // Cache is updated inside this function
 	
 	// Filter the original metrics to only include top-N processes
 	resourceMetrics = md.ResourceMetrics()
@@ -315,7 +336,11 @@ func (tp *topNProcessor) processMetricsSequential(ctx context.Context, md pmetri
 		resource := rm.Resource()
 
 		// Extract process info from resource attributes
-		pid := resource.Attributes().GetStr("process.pid")
+		pidVal, ok := resource.Attributes().Get("process.pid")
+		pid := ""
+		if ok {
+			pid = pidVal.Str()
+		}
 
 		// If not a process metric or is in top-N, include it
 		if pid == "" || tp.isInTopN(pid) {

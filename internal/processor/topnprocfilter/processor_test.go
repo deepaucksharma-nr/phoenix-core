@@ -10,7 +10,6 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
-	"go.opentelemetry.io/collector/processor"
 	"go.uber.org/zap"
 )
 
@@ -24,11 +23,12 @@ func TestProcessorCreation(t *testing.T) {
 		RegistryID:      "test_proc_top_n",
 	}
 	
-	set := processor.CreateSettings{
+	set := processorCreateSettings{
 		TelemetrySettings: component.TelemetrySettings{
 			Logger: zap.NewNop(),
 		},
 		BuildInfo: component.BuildInfo{},
+		Logger: zap.NewNop(),
 	}
 	
 	proc, err := newProcessor(set, cfg)
@@ -55,7 +55,7 @@ func TestQuickSelect(t *testing.T) {
 	}
 	
 	// Get top 3 by CPU
-	topN := getTopNByMetric(processes, 3, func(p *processMetric) float64 { return p.CPUUsage })
+	topN := getTopNByMetricOptimized(processes, 3, func(p *processMetric) float64 { return p.CPUUsage })
 	
 	// Check length
 	assert.Equal(t, 3, len(topN))
@@ -81,11 +81,12 @@ func TestProcessMetrics(t *testing.T) {
 		RegistryID:      "test_proc_top_n",
 	}
 	
-	set := processor.CreateSettings{
+	set := processorCreateSettings{
 		TelemetrySettings: component.TelemetrySettings{
 			Logger: zap.NewNop(),
 		},
 		BuildInfo: component.BuildInfo{},
+		Logger: zap.NewNop(),
 	}
 	
 	proc, err := newProcessor(set, cfg)
@@ -106,7 +107,11 @@ func TestProcessMetrics(t *testing.T) {
 	processCount := 0
 	for i := 0; i < resourceMetrics.Len(); i++ {
 		rm := resourceMetrics.At(i)
-		pid := rm.Resource().Attributes().GetStr("process.pid")
+		pidVal, ok := rm.Resource().Attributes().Get("process.pid")
+		pid := ""
+		if ok {
+			pid = pidVal.Str()
+		}
 		if pid != "" {
 			processCount++
 			// Should be either proc1 or proc3
@@ -200,24 +205,23 @@ func TestPeriodicCleanup(t *testing.T) {
 		RegistryID:      "test_proc_cleanup",
 	}
 
-	set := processor.CreateSettings{
+	set := processorCreateSettings{
 		TelemetrySettings: component.TelemetrySettings{
 			Logger: zap.NewNop(),
 		},
 		BuildInfo: component.BuildInfo{},
+		Logger: zap.NewNop(),
 	}
 
-	proc, err := newProcessor(set, cfg)
+	tp, err := newProcessor(set, cfg)
 	require.NoError(t, err)
-
-	tp := proc.(*topNProcessor)
 
 	// Add some test processes
 	now := time.Now().Unix()
 	oldTime := now - 10 // 10 seconds ago
 
 	// Process that should be removed (old LastAboveThresholdUnix)
-	tp.processes["1"] = &processMetric{
+	p1 := &processMetric{
 		PID:                   "1",
 		ProcessName:           "proc1",
 		CPUUsage:              0.5,
@@ -225,9 +229,10 @@ func TestPeriodicCleanup(t *testing.T) {
 		LastUpdatedUnix:       now,
 		LastAboveThresholdUnix: oldTime,
 	}
+	tp.processes.Store("1", p1)
 
 	// Process that should be kept (recent LastAboveThresholdUnix)
-	tp.processes["2"] = &processMetric{
+	p2 := &processMetric{
 		PID:                   "2",
 		ProcessName:           "proc2",
 		CPUUsage:              0.5,
@@ -235,12 +240,16 @@ func TestPeriodicCleanup(t *testing.T) {
 		LastUpdatedUnix:       now,
 		LastAboveThresholdUnix: now,
 	}
+	tp.processes.Store("2", p2)
 
 	// Run cleanup
 	time.Sleep(time.Millisecond * 100) // Small delay
-	tp.periodicCleanup(context.Background())
+	idleTTL, _ := time.ParseDuration(cfg.IdleTTL)
+	tp.periodicCleanup(idleTTL)
 
 	// Check that process 1 was removed and process 2 remains
-	assert.NotContains(t, tp.processes, "1", "Process 1 should have been removed")
-	assert.Contains(t, tp.processes, "2", "Process 2 should have been kept")
+	_, p1exists := tp.processes.Load("1")
+	_, p2exists := tp.processes.Load("2")
+	assert.False(t, p1exists, "Process 1 should have been removed")
+	assert.True(t, p2exists, "Process 2 should have been kept")
 }

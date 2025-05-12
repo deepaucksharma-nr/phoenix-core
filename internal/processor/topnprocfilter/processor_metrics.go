@@ -2,8 +2,6 @@ package topnprocfilter
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/deepaucksharma-nr/phoenix-core/internal/metrics"
@@ -11,22 +9,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// Constants for metrics reporting optimization
-const (
-	defaultMetricsReportingInterval = 10 * time.Second
-	defaultMetricsBufferSize        = 100
-	defaultMetricsBatchSize         = 10
-	circuitBreakerThreshold         = 5   // Number of consecutive errors before opening circuit
-	circuitBreakerResetInterval     = 30  // Seconds before trying to close circuit again
-)
-
-// metricUpdate represents a metric update operation to be processed
-type metricUpdate struct {
-	metricName string
-	value      float64
-	attrs      map[string]string
-	metricType string // "gauge" or "counter"
-}
 
 // cleanupIdleProcesses starts the idle process cleanup
 func (tp *topNProcessor) cleanupIdleProcesses(idleTTL time.Duration) {

@@ -4,19 +4,23 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
-	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/deepaucksharma-nr/phoenix-core/internal/metrics"
 	"github.com/deepaucksharma-nr/phoenix-core/internal/pkg/tunableregistry"
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
-	"go.opentelemetry.io/collector/processor"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
+
+// Mock processor.CreateSettings for testing
+type processorCreateSettings struct {
+	TelemetrySettings component.TelemetrySettings
+	BuildInfo         component.BuildInfo
+	Logger            *zap.Logger
+}
 
 // processMetric is a structure holding metric values for a specific process
 // Optimized for memory efficiency by using time.Unix values instead of time.Time objects
@@ -55,10 +59,23 @@ type topNProcessor struct {
 	currentMemThreshold atomic.Float64
 	cacheHitCount       atomic.Int64
 	cacheMissCount      atomic.Int64
+
+	// Concurrency control
+	concurrencyLimit int
+	workerSemaphore  chan struct{}
+
+	// Metrics reporting optimizations
+	metricsReportingInterval time.Duration
+	metricsBuffer            chan metricUpdate
+	metricsErrorCount        atomic.Int64
+	metricsCircuitOpen       atomic.Bool
+	metricsCircuitResetTime  atomic.Int64
+	metricsBatchSize         int
+	metricsWg                sync.WaitGroup
 }
 
 // newProcessor creates a new topN process metrics filter processor
-func newProcessor(set processor.CreateSettings, config *Config) (*topNProcessor, error) {
+func newProcessor(set processorCreateSettings, config *Config) (*topNProcessor, error) {
 	idleTTL, err := time.ParseDuration(config.IdleTTL)
 	if err != nil {
 		return nil, err
@@ -211,15 +228,15 @@ func (tp *topNProcessor) GetProbability() float64 {
 	return tp.GetValue("top_n_ratio")
 }
 
-// Start implements the processor.Component interface
-func (tp *topNProcessor) Start(_ context.Context, _ component.Host) error {
-	return nil
-}
+// Implemented in processor_metrics.go
+// func (tp *topNProcessor) Start(ctx context.Context, host component.Host) error {
+//     return nil
+// }
 
-// Shutdown implements the processor.Component interface
-func (tp *topNProcessor) Shutdown(_ context.Context) error {
-	return nil
-}
+// Implemented in processor_metrics.go
+// func (tp *topNProcessor) Shutdown(ctx context.Context) error {
+//     return nil
+// }
 
 // processMetrics implements the core top-N filtering logic
 // processMetrics implements the core top-N filtering logic
@@ -234,13 +251,15 @@ func (tp *topNProcessor) processMetrics(ctx context.Context, md pmetric.Metrics)
 // used in the optimized top-N algorithm
 type processPriorityQueue struct {
 	items []*processMetric
-	less  func(i, j int) bool
+	less  func(p *processMetric) float64
 }
 
 // Implement heap.Interface methods for processPriorityQueue
 func (pq *processPriorityQueue) Len() int { return len(pq.items) }
 func (pq *processPriorityQueue) Swap(i, j int) { pq.items[i], pq.items[j] = pq.items[j], pq.items[i] }
-func (pq *processPriorityQueue) Less(i, j int) bool { return pq.less(i, j) }
+func (pq *processPriorityQueue) Less(i, j int) bool {
+	return pq.less(pq.items[i]) < pq.less(pq.items[j])
+}
 
 func (pq *processPriorityQueue) Push(x interface{}) {
 	pq.items = append(pq.items, x.(*processMetric))
@@ -364,14 +383,17 @@ func getTopNByMetricOptimized(processes []*processMetric, n int, valueFn func(*p
 	// Create a min-heap
 	h := &processPriorityQueue{
 		items: make([]*processMetric, 0, n),
-		less: func(i, j int) bool {
-			return valueFn(h.items[i]) < valueFn(h.items[j])
-		},
+		less:  valueFn,
 	}
 
 	// Initialize with first n elements
 	for i := 0; i < n && i < len(processes); i++ {
 		heap.Push(h, processes[i])
+	}
+
+	// Make sure we have items before continuing
+	if h.Len() == 0 {
+		return processes[:0] // Return empty slice if no processes
 	}
 
 	// Process remaining elements - only keep those larger than the minimum in heap
@@ -460,7 +482,7 @@ func (tp *topNProcessor) isInTopN(pid string) bool {
 
 	// If we get here and cache isn't valid, we need to recompute
 	if !tp.topNCacheValid {
-		topN := tp.getTopNProcesses() // This will rebuild the cache
+		_ = tp.getTopNProcesses() // This will rebuild the cache
 
 		// After cache is built, use it
 		tp.topNCacheMu.RLock()
