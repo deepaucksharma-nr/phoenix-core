@@ -14,6 +14,22 @@ data:
           http:
             endpoint: "0.0.0.0:4318"
 
+      {{- if .Values.processMetrics.enabled }}
+      hostmetrics:
+        collection_interval: 30s
+        scrapers:
+          process:
+            mute_process_user_error: true
+            include_process_command_line: true
+            mute_process_command_line_error: true
+            include_process_command_line_args: true
+            mute_process_command_line_args_error: true
+            include_process_memory_usage: true
+            mute_process_memory_usage_error: true
+            include_process_cpu_utilization: true
+            mute_process_cpu_utilization_error: true
+      {{- end }}
+
     processors:
       memory_limiter:
         check_interval: 5s
@@ -56,11 +72,46 @@ data:
       {{- end }}
 
       {{- if .Values.processMetrics.enabled }}
+      fallback_proc_parser:
+        enabled: ${PTE_PROC_FALLBACK_ENABLED}
+        attributes_to_fetch: ${PTE_PROC_FALLBACK_ATTRS}
+        strict_mode: ${PTE_PROC_ATTR_STRICT_MODE}
+        critical_attributes: ${PTE_PROC_CRITICAL_ATTRS}
+
+      transform/process_normalize:
+        metric_statements:
+          - context: datapoint
+            statements:
+              # Create process.display_name from executable and command line
+              - set(resource.attributes["process.display_name"],
+                  Concat([resource.attributes["process.executable.name"], " ",
+                    Trunc(resource.attributes["process.command_line"], 50)], ""))
+                where IsMatch(resource.attributes["process.executable.name"], ".+") and
+                      IsMatch(resource.attributes["process.command_line"], ".+")
+
+              # Create simplified display name for Java processes
+              - set(resource.attributes["process.display_name"],
+                  RegexReplace(resource.attributes["process.command_line"], "^.*-jar\\s+([^\\s]+).*$", "java -jar $1"))
+                where IsMatch(resource.attributes["process.executable.name"], "^java$") and
+                      RegexMatch(resource.attributes["process.command_line"], "-jar\\s+[^\\s]+")
+
+              # Create process.group from owner
+              - set(resource.attributes["process.group"], resource.attributes["process.owner"])
+                where IsMatch(resource.attributes["process.owner"], ".+")
+
+      transform/drop_pid_attr:
+        metric_statements:
+          - context: datapoint
+            statements:
+              # Remove process.pid attribute to reduce cardinality
+              - delete_key(resource.attributes, "process.pid")
+
       topn_process_metrics_filter:
         top_n: ${PTE_PROCESS_TOPN_N}
         cpu_threshold: ${PTE_PROCESS_CPU_THRESHOLD}
         memory_threshold: ${PTE_PROCESS_MEMORY_THRESHOLD}
         idle_ttl: ${PTE_PROCESS_IDLE_TTL}
+        max_pids_to_scan_per_scrape: ${PTE_PROCESS_MAX_PIDS}
         registry_id: "proc_top_n"
       {{- end }}
 
@@ -75,6 +126,10 @@ data:
         window_duration: ${PTE_SAMPLING_RESERVOIR_WINDOW}
         checkpoint_path: "{{ include "pte.dataDir" . }}/reservoir_state.db"
         checkpoint_interval: ${PTE_SAMPLING_RESERVOIR_CHECKPOINT}
+        {{- if .Values.sampling.tail_reservoir.dbCompaction.enabled }}
+        db_compaction_schedule_cron: ${PTE_SAMPLING_RESERVOIR_COMPACTION_CRON}
+        db_compaction_target_size: ${PTE_SAMPLING_RESERVOIR_COMPACTION_TARGET_SIZE}
+        {{- end }}
 
       batch:
         send_batch_size: 1024
@@ -148,7 +203,9 @@ data:
         aggressive_drop_window_count: ${PTE_PID_AGGRESSIVE_WINDOW_COUNT}
         metrics_endpoint: "http://localhost:{{ .Values.monitoring.prometheus.port }}/metrics"
         exporter_names: ["otlphttp/newrelic_default"]
-        sampler_registry_id: "adaptive_head_sampler"
+        tunable_registry_id: "adaptive_head_sampler"
+        # Deprecated: Use tunable_registry_id instead
+        # sampler_registry_id: "adaptive_head_sampler"
       {{- end }}
 
     service:
@@ -190,3 +247,51 @@ data:
             {{- end }}
             {{- end }}
             - otlphttp/newrelic_default
+
+        {{- if .Values.sampling.head.logs.enabled }}
+        logs/default:
+          receivers: [otlp]
+          processors:
+            - memory_limiter
+            - k8sattributes
+            - resource
+            {{- if .Values.pii.fieldsToHash }}
+            - transform/pii
+            {{- end }}
+            - adaptive_head_sampler
+            - batch
+            {{- if .Values.multiTenant.enabled }}
+            - routing
+            {{- end }}
+          exporters:
+            {{- if .Values.multiTenant.enabled }}
+            {{- range .Values.multiTenant.tenants }}
+            - otlphttp/{{ .id }}
+            {{- end }}
+            {{- end }}
+            - otlphttp/newrelic_default
+        {{- end }}
+
+        {{- if .Values.processMetrics.enabled }}
+        metrics/hostprocesses:
+          receivers: [hostmetrics]
+          processors:
+            - memory_limiter
+            - k8sattributes
+            - resource
+            - fallback_proc_parser
+            - transform/process_normalize
+            - topn_process_metrics_filter
+            - transform/drop_pid_attr
+            - batch
+            {{- if .Values.multiTenant.enabled }}
+            - routing
+            {{- end }}
+          exporters:
+            {{- if .Values.multiTenant.enabled }}
+            {{- range .Values.multiTenant.tenants }}
+            - otlphttp/{{ .id }}
+            {{- end }}
+            {{- end }}
+            - otlphttp/newrelic_default
+        {{- end }}

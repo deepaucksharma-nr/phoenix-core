@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/deepaucksharma-nr/phoenix-core/internal/pkg/samplerregistry"
+	"github.com/deepaucksharma-nr/phoenix-core/internal/pkg/tunableregistry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
@@ -16,17 +16,27 @@ import (
 	"go.uber.org/zap"
 )
 
-// mockSampler implements the ProbSampler interface for testing
-type mockSampler struct {
+// mockTunable implements the Tunable interface for testing
+type mockTunable struct {
 	prob float64
+	id   string
 }
 
-func (m *mockSampler) SetProbability(p float64) {
-	m.prob = p
+func (m *mockTunable) SetValue(key string, value float64) {
+	if key == "probability" {
+		m.prob = value
+	}
 }
 
-func (m *mockSampler) GetProbability() float64 {
-	return m.prob
+func (m *mockTunable) GetValue(key string) float64 {
+	if key == "probability" {
+		return m.prob
+	}
+	return 0.0
+}
+
+func (m *mockTunable) ID() string {
+	return m.id
 }
 
 func TestPIDController(t *testing.T) {
@@ -44,7 +54,7 @@ otelcol_exporter_queue_capacity{exporter="otlphttp/newrelic_default"} 1000
 `))
 	}))
 	defer highUtilServer.Close()
-	
+
 	lowUtilServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Respond with metrics indicating low queue utilization
 		w.WriteHeader(http.StatusOK)
@@ -58,11 +68,11 @@ otelcol_exporter_queue_capacity{exporter="otlphttp/newrelic_default"} 1000
 `))
 	}))
 	defer lowUtilServer.Close()
-	
-	// Register a mock sampler
-	mockSamp := &mockSampler{prob: 0.5}
-	registry := samplerregistry.GetInstance()
-	registry.Register("adaptive_head_sampler", mockSamp)
+
+	// Register a mock tunable
+	mockSamp := &mockTunable{prob: 0.5, id: "adaptive_head_sampler"}
+	registry := tunableregistry.GetInstance()
+	registry.Register(mockSamp)
 	
 	// Create a PID controller with high utilization
 	highUtilConfig := &Config{
@@ -76,7 +86,7 @@ otelcol_exporter_queue_capacity{exporter="otlphttp/newrelic_default"} 1000
 		AggressiveDropWindowCount:  3,
 		MetricsEndpoint:            highUtilServer.URL,
 		ExporterNames:              []string{"otlphttp/newrelic_default"},
-		SamplerRegistryID:          "adaptive_head_sampler",
+		TunableRegistryID:          "adaptive_head_sampler",
 	}
 	
 	set := extension.CreateSettings{
@@ -97,14 +107,14 @@ otelcol_exporter_queue_capacity{exporter="otlphttp/newrelic_default"} 1000
 	time.Sleep(150 * time.Millisecond)
 	
 	// Check that probability was decreased
-	assert.Less(t, mockSamp.GetProbability(), 0.5, "Probability should decrease due to high utilization")
+	assert.Less(t, mockSamp.GetValue("probability"), 0.5, "Probability should decrease due to high utilization")
 	
 	// Stop the controller
 	err = highUtilController.Shutdown(context.Background())
 	require.NoError(t, err)
 	
 	// Reset the sampler
-	mockSamp.SetProbability(0.5)
+	mockSamp.SetValue("probability", 0.5)
 	
 	// Create a PID controller with low utilization
 	lowUtilConfig := &Config{
@@ -118,7 +128,7 @@ otelcol_exporter_queue_capacity{exporter="otlphttp/newrelic_default"} 1000
 		AggressiveDropWindowCount:  3,
 		MetricsEndpoint:            lowUtilServer.URL,
 		ExporterNames:              []string{"otlphttp/newrelic_default"},
-		SamplerRegistryID:          "adaptive_head_sampler",
+		TunableRegistryID:          "adaptive_head_sampler",
 	}
 	
 	lowUtilController, err := newPIDController(set, lowUtilConfig)
@@ -132,7 +142,7 @@ otelcol_exporter_queue_capacity{exporter="otlphttp/newrelic_default"} 1000
 	time.Sleep(150 * time.Millisecond)
 	
 	// Check that probability was increased
-	assert.Greater(t, mockSamp.GetProbability(), 0.5, "Probability should increase due to low utilization")
+	assert.Greater(t, mockSamp.GetValue("probability"), 0.5, "Probability should increase due to low utilization")
 	
 	// Stop the controller
 	err = lowUtilController.Shutdown(context.Background())
@@ -154,11 +164,11 @@ otelcol_exporter_queue_capacity{exporter="otlphttp/newrelic_default"} 1000
 `))
 	}))
 	defer highUtilServer.Close()
-	
-	// Register a mock sampler
-	mockSamp := &mockSampler{prob: 0.5}
-	registry := samplerregistry.GetInstance()
-	registry.Register("adaptive_head_sampler", mockSamp)
+
+	// Register a mock tunable
+	mockSamp := &mockTunable{prob: 0.5, id: "adaptive_head_sampler"}
+	registry := tunableregistry.GetInstance()
+	registry.Register(mockSamp)
 	
 	// Create a PID controller with aggressive drop enabled
 	config := &Config{
@@ -172,7 +182,7 @@ otelcol_exporter_queue_capacity{exporter="otlphttp/newrelic_default"} 1000
 		AggressiveDropWindowCount:  2,   // After 2 cycles
 		MetricsEndpoint:            highUtilServer.URL,
 		ExporterNames:              []string{"otlphttp/newrelic_default"},
-		SamplerRegistryID:          "adaptive_head_sampler",
+		TunableRegistryID:          "adaptive_head_sampler",
 	}
 	
 	set := extension.CreateSettings{
@@ -190,27 +200,27 @@ otelcol_exporter_queue_capacity{exporter="otlphttp/newrelic_default"} 1000
 	require.NoError(t, err)
 	
 	// Initial probability
-	initialP := mockSamp.GetProbability()
-	
+	initialP := mockSamp.GetValue("probability")
+
 	// Wait for first cycle (normal adjustment)
 	time.Sleep(60 * time.Millisecond)
-	
+
 	// Check probability decreased by normal factor
-	firstP := mockSamp.GetProbability()
+	firstP := mockSamp.GetValue("probability")
 	assert.InDelta(t, initialP*0.8, firstP, 0.01, "First adjustment should use normal factor")
-	
+
 	// Wait for second cycle (normal adjustment)
 	time.Sleep(60 * time.Millisecond)
-	
+
 	// Check probability decreased by normal factor again
-	secondP := mockSamp.GetProbability()
+	secondP := mockSamp.GetValue("probability")
 	assert.InDelta(t, firstP*0.8, secondP, 0.01, "Second adjustment should use normal factor")
-	
+
 	// Wait for third cycle (aggressive adjustment)
 	time.Sleep(60 * time.Millisecond)
-	
+
 	// Check probability decreased by aggressive factor
-	thirdP := mockSamp.GetProbability()
+	thirdP := mockSamp.GetValue("probability")
 	assert.InDelta(t, secondP*0.5, thirdP, 0.01, "Third adjustment should use aggressive factor")
 	
 	// Stop the controller
