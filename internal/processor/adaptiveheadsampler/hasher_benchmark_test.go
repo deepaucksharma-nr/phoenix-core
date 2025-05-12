@@ -9,8 +9,8 @@ import (
 )
 
 func BenchmarkXORTraceIDHasher(b *testing.B) {
-	// Create a processor instance
-	p := &adaptiveHeadSamplerProcessor{}
+	// Create a processor base instance
+	p := &adaptiveSamplerBase{}
 	
 	// Create a sample trace ID
 	traceID := make([]byte, 16)
@@ -26,8 +26,8 @@ func BenchmarkXORTraceIDHasher(b *testing.B) {
 }
 
 func BenchmarkRecordIDHasher_xxHash(b *testing.B) {
-	// Create a processor instance
-	p := &adaptiveHeadSamplerProcessor{}
+	// Create a processor base instance
+	p := &adaptiveSamplerBase{}
 	
 	// Create a sample record ID (for logs)
 	recordID := []byte("test.container.id.with.long.name.and.some.more.data.to.hash")
