@@ -45,12 +45,13 @@ func TestProcessorCreation(t *testing.T) {
 
 func TestQuickSelect(t *testing.T) {
 	// Create test processes
+	now := time.Now().Unix()
 	processes := []*processMetric{
-		{PID: "1", ProcessName: "proc1", CPUUsage: 0.5},
-		{PID: "2", ProcessName: "proc2", CPUUsage: 0.3},
-		{PID: "3", ProcessName: "proc3", CPUUsage: 0.8},
-		{PID: "4", ProcessName: "proc4", CPUUsage: 0.1},
-		{PID: "5", ProcessName: "proc5", CPUUsage: 0.9},
+		{PID: "1", ProcessName: "proc1", CPUUsage: 0.5, LastUpdatedUnix: now, LastAboveThresholdUnix: now},
+		{PID: "2", ProcessName: "proc2", CPUUsage: 0.3, LastUpdatedUnix: now, LastAboveThresholdUnix: now},
+		{PID: "3", ProcessName: "proc3", CPUUsage: 0.8, LastUpdatedUnix: now, LastAboveThresholdUnix: now},
+		{PID: "4", ProcessName: "proc4", CPUUsage: 0.1, LastUpdatedUnix: now, LastAboveThresholdUnix: now},
+		{PID: "5", ProcessName: "proc5", CPUUsage: 0.9, LastUpdatedUnix: now, LastAboveThresholdUnix: now},
 	}
 	
 	// Get top 3 by CPU
@@ -187,4 +188,59 @@ func addNonProcessMetrics(metrics pmetric.Metrics) {
 	dp := metricCPU.SetEmptyGauge().DataPoints().AppendEmpty()
 	dp.SetDoubleValue(0.3)
 	dp.SetTimestamp(pcommon.NewTimestampFromTime(time.Now()))
+}
+
+func TestPeriodicCleanup(t *testing.T) {
+	// Create a basic config with short IdleTTL
+	cfg := &Config{
+		TopN:            5,
+		CPUThreshold:    0.01,
+		MemoryThreshold: 0.01,
+		IdleTTL:         "1s", // 1 second for fast testing
+		RegistryID:      "test_proc_cleanup",
+	}
+
+	set := processor.CreateSettings{
+		TelemetrySettings: component.TelemetrySettings{
+			Logger: zap.NewNop(),
+		},
+		BuildInfo: component.BuildInfo{},
+	}
+
+	proc, err := newProcessor(set, cfg)
+	require.NoError(t, err)
+
+	tp := proc.(*topNProcessor)
+
+	// Add some test processes
+	now := time.Now().Unix()
+	oldTime := now - 10 // 10 seconds ago
+
+	// Process that should be removed (old LastAboveThresholdUnix)
+	tp.processes["1"] = &processMetric{
+		PID:                   "1",
+		ProcessName:           "proc1",
+		CPUUsage:              0.5,
+		MemoryUsage:           0.1,
+		LastUpdatedUnix:       now,
+		LastAboveThresholdUnix: oldTime,
+	}
+
+	// Process that should be kept (recent LastAboveThresholdUnix)
+	tp.processes["2"] = &processMetric{
+		PID:                   "2",
+		ProcessName:           "proc2",
+		CPUUsage:              0.5,
+		MemoryUsage:           0.1,
+		LastUpdatedUnix:       now,
+		LastAboveThresholdUnix: now,
+	}
+
+	// Run cleanup
+	time.Sleep(time.Millisecond * 100) // Small delay
+	tp.periodicCleanup(context.Background())
+
+	// Check that process 1 was removed and process 2 remains
+	assert.NotContains(t, tp.processes, "1", "Process 1 should have been removed")
+	assert.Contains(t, tp.processes, "2", "Process 2 should have been kept")
 }
