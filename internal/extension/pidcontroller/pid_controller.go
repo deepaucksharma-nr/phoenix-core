@@ -37,7 +37,7 @@ type pidControllerExtension struct {
 	metricsTicker           *time.Ticker
 	adjustmentCount         atomic.Int64
 	aggressiveDropCount     atomic.Int64
-	currentQueueUtilization atomic.Float64
+	currentQueueUtilization atomic.Value // stores float64
 }
 
 // Ensure the extension implements required interfaces
@@ -81,11 +81,8 @@ func newPIDController(settings extension.CreateSettings, config component.Config
 		return nil, fmt.Errorf("failed to initialize metrics: %w", err)
 	}
 
-	// Determine which registry ID to log
+	// Get the registry ID
 	registryID := cfg.TunableRegistryID
-	if registryID == "" {
-		registryID = cfg.SamplerRegistryID // Fallback to deprecated field
-	}
 
 	controller.logger.Info("PID controller extension created",
 		zap.String("interval", cfg.Interval),
@@ -176,7 +173,7 @@ func (pc *pidControllerExtension) reportMetrics() {
 		select {
 		case <-pc.metricsTicker.C:
 			// Report queue utilization
-			utilization := pc.currentQueueUtilization.Load()
+			utilization := pc.currentQueueUtilization.Load().(float64)
 			err := pc.metricsRegistry.UpdateGauge(
 				context.Background(),
 				metrics.MetricPTEPIDQueueUtilization,
@@ -249,11 +246,8 @@ func (pc *pidControllerExtension) runControlCycle() {
 	newEWMA := pc.config.EWMAAlpha*queueUtilization + (1-pc.config.EWMAAlpha)*oldEWMA
 	pc.ewma.Store(newEWMA)
 
-	// Determine which ID to use (prefer TunableRegistryID if available)
+	// Get the registry ID
 	registryID := pc.config.TunableRegistryID
-	if registryID == "" {
-		registryID = pc.config.SamplerRegistryID // Fallback to deprecated field
-	}
 
 	// Look up the tunable
 	tunable, exists := pc.tunableRegistry.Lookup(registryID)

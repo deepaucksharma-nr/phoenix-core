@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/extension"
 )
 
 // Config defines configuration for the PID controller extension.
@@ -42,9 +41,6 @@ type Config struct {
 	
 	// TunableRegistryID is the ID of the tunable component in the registry
 	TunableRegistryID string `mapstructure:"tunable_registry_id"`
-
-	// SamplerRegistryID is the ID of the sampler in the registry (deprecated, use TunableRegistryID instead)
-	SamplerRegistryID string `mapstructure:"sampler_registry_id"`
 }
 
 var _ component.Config = (*Config)(nil)
@@ -101,10 +97,10 @@ func (cfg *Config) Validate() error {
 	if len(cfg.ExporterNames) == 0 {
 		return fmt.Errorf("exporter_names must include at least one exporter")
 	}
-	
-	// Check if at least one registry ID is specified (prefer TunableRegistryID)
-	if cfg.TunableRegistryID == "" && cfg.SamplerRegistryID == "" {
-		return fmt.Errorf("either tunable_registry_id or sampler_registry_id must be specified")
+
+	// Check if registry ID is specified
+	if cfg.TunableRegistryID == "" {
+		return fmt.Errorf("tunable_registry_id must be specified")
 	}
 	
 	return nil
@@ -124,6 +120,5 @@ func createDefaultConfig() component.Config {
 		MetricsEndpoint:            "http://localhost:8888/metrics",
 		ExporterNames:              []string{"otlphttp/newrelic_default"},
 		TunableRegistryID:          "adaptive_head_sampler",
-		SamplerRegistryID:          "", // Deprecated
 	}
 }
