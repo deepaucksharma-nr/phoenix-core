@@ -20,7 +20,7 @@ func TestProcessorCreation(t *testing.T) {
 		CPUThreshold:    0.05,
 		MemoryThreshold: 0.05,
 		IdleTTL:         "1m",
-		RegistryID:      "test_proc_top_n",
+		TunableRegistryID: "test_proc_top_n",
 	}
 	
 	set := processorCreateSettings{
@@ -78,7 +78,7 @@ func TestProcessMetrics(t *testing.T) {
 		CPUThreshold:    0.01,
 		MemoryThreshold: 0.01,
 		IdleTTL:         "1m",
-		RegistryID:      "test_proc_top_n",
+		TunableRegistryID: "test_proc_top_n",
 	}
 	
 	set := processorCreateSettings{
@@ -202,7 +202,7 @@ func TestPeriodicCleanup(t *testing.T) {
 		CPUThreshold:    0.01,
 		MemoryThreshold: 0.01,
 		IdleTTL:         "1s", // 1 second for fast testing
-		RegistryID:      "test_proc_cleanup",
+		TunableRegistryID: "test_proc_cleanup",
 	}
 
 	set := processorCreateSettings{
@@ -242,10 +242,10 @@ func TestPeriodicCleanup(t *testing.T) {
 	}
 	tp.processes.Store("2", p2)
 
-	// Run cleanup
+	// Run a single cleanup cycle instead of starting the periodic cleanup routine
 	time.Sleep(time.Millisecond * 100) // Small delay
 	idleTTL, _ := time.ParseDuration(cfg.IdleTTL)
-	tp.periodicCleanup(idleTTL)
+	tp.runCleanupCycle(idleTTL)
 
 	// Check that process 1 was removed and process 2 remains
 	_, p1exists := tp.processes.Load("1")

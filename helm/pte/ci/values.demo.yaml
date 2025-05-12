@@ -17,6 +17,9 @@ sampling:
     logs:
       enabled: false
       initialProbability: 0.5
+      minProbability: 0.01
+      maxProbability: 0.9
+      recordIDFields: ["log.file.path", "k8s.pod.name", "message"]
   tail_reservoir:
     k_size: 2000
     windowSeconds: 60
@@ -39,6 +42,17 @@ processMetrics:
   cpuThreshold: 0.5
   memoryThreshold: 0.5
   idleWindowSeconds: 300
+  maxPidsToScanPerScrape: 5000
+
+  # Fallback parser configuration
+  fallbackParser:
+    enabled: true
+    attributesToFetch: ["command_line", "owner", "io"]
+
+  # Attribute presence gate
+  attrPresenceGate:
+    strictMode: false
+    criticalAttributes: ["process.executable.name", "process.command_line"]
 
 # Simple PII protection
 pii:

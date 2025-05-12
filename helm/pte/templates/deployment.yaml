@@ -78,7 +78,7 @@ spec:
             # Sampling configuration
             - name: PTE_SAMPLING_HEAD_P_INIT
               value: {{ .Values.sampling.head.initialProbability | quote }}
-            - name: PTE_SAMPLING_HEAD_P_MIN 
+            - name: PTE_SAMPLING_HEAD_P_MIN
               value: {{ .Values.sampling.head.minProbability | quote }}
             - name: PTE_SAMPLING_HEAD_P_MAX
               value: {{ .Values.sampling.head.maxProbability | quote }}
@@ -88,6 +88,22 @@ spec:
               value: {{ .Values.sampling.tail_reservoir.windowSeconds }}s
             - name: PTE_SAMPLING_RESERVOIR_CHECKPOINT
               value: {{ .Values.sampling.tail_reservoir.checkpointIntervalSeconds }}s
+            {{- if .Values.sampling.tail_reservoir.dbCompaction.enabled }}
+            - name: PTE_SAMPLING_RESERVOIR_COMPACTION_CRON
+              value: {{ .Values.sampling.tail_reservoir.dbCompaction.scheduleCron | quote }}
+            - name: PTE_SAMPLING_RESERVOIR_COMPACTION_TARGET_SIZE
+              value: {{ mul .Values.sampling.tail_reservoir.dbCompaction.targetSizeMB 1048576 | quote }}
+            {{- end }}
+
+            # Logs sampling configuration
+            {{- if .Values.sampling.head.logs.enabled }}
+            - name: PTE_SAMPLING_LOGS_ENABLED
+              value: "true"
+            - name: PTE_SAMPLING_LOGS_P_INIT
+              value: {{ .Values.sampling.head.logs.initialProbability | quote }}
+            - name: PTE_SAMPLING_LOGS_RECORD_ID_FIELDS
+              value: {{ join "," .Values.sampling.head.logs.recordIDFields | quote }}
+            {{- end }}
             
             # PID controller configuration
             {{- if .Values.sampling.adaptive_controller.enabled }}
@@ -119,6 +135,18 @@ spec:
               value: {{ .Values.processMetrics.memoryThreshold | quote }}
             - name: PTE_PROCESS_IDLE_TTL
               value: {{ .Values.processMetrics.idleWindowSeconds }}s
+            - name: PTE_PROCESS_MAX_PIDS
+              value: {{ .Values.processMetrics.maxPidsToScanPerScrape | quote }}
+
+            # Fallback parser configuration
+            - name: PTE_PROC_FALLBACK_ENABLED
+              value: {{ .Values.processMetrics.fallbackParser.enabled | quote }}
+            - name: PTE_PROC_FALLBACK_ATTRS
+              value: {{ join "," .Values.processMetrics.fallbackParser.attributesToFetch | quote }}
+            - name: PTE_PROC_ATTR_STRICT_MODE
+              value: {{ .Values.processMetrics.attrPresenceGate.strictMode | quote }}
+            - name: PTE_PROC_CRITICAL_ATTRS
+              value: {{ join "," .Values.processMetrics.attrPresenceGate.criticalAttributes | quote }}
             {{- end }}
             
             # Extra environment variables

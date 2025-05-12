@@ -6,6 +6,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/processor"
+	"go.opentelemetry.io/collector/processor/processorhelper"
 )
 
 const (
@@ -19,6 +20,7 @@ func NewFactory() processor.Factory {
 		typeStr,
 		createDefaultConfig,
 		processor.WithTraces(createTracesProcessor, component.StabilityLevelBeta),
+		processor.WithLogs(createLogsProcessor, component.StabilityLevelBeta),
 	)
 }
 
@@ -29,5 +31,27 @@ func createTracesProcessor(
 	cfg component.Config,
 	nextConsumer consumer.Traces,
 ) (processor.Traces, error) {
-	return newProcessor(set, cfg, nextConsumer)
+	return newTracesProcessor(set, cfg, nextConsumer)
+}
+
+// createLogsProcessor creates a logs processor based on this config.
+func createLogsProcessor(
+	ctx context.Context,
+	set processor.CreateSettings,
+	cfg component.Config,
+	nextConsumer consumer.Logs,
+) (processor.Logs, error) {
+	p, err := newLogsProcessor(set, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return processorhelper.NewLogsProcessor(
+		ctx,
+		set,
+		cfg,
+		nextConsumer,
+		p.processLogs,
+		processorhelper.WithCapabilities(consumer.Capabilities{MutatesData: true}),
+	)
 }

@@ -38,10 +38,16 @@ sampling:
       initialProbability: 0.5
       minProbability: 0.01
       maxProbability: 0.9
+      recordIDFields: ["log.file.path", "k8s.pod.name", "message"]
   tail_reservoir:
     k_size: 5000
     windowSeconds: 60
     checkpointIntervalSeconds: 10
+    # BoltDB compaction settings
+    dbCompaction:
+      enabled: true
+      scheduleCron: "0 2 * * 0"  # Run at 2:00 AM every Sunday
+      targetSizeMB: 10           # 10MB target size
   adaptive_controller:
     enabled: true
     intervalSeconds: 15
@@ -61,6 +67,17 @@ processMetrics:
   cpuThreshold: 0.01 # 1% CPU utilization threshold
   memoryThreshold: 0.01 # 1% memory utilization threshold
   idleWindowSeconds: 300 # How long to keep a process after it drops below threshold
+  maxPidsToScanPerScrape: 5000 # Hard limit on PIDs to scan per scrape
+
+  # Fallback parser for enriching process metrics with attributes
+  fallbackParser:
+    enabled: true # Whether to enable fallback parsing from /proc
+    attributesToFetch: ["command_line", "owner", "io"] # Which attributes to fetch
+
+  # Attribute presence gate for quality control
+  attrPresenceGate:
+    strictMode: false # If true, drop metrics missing critical attributes; if false, just warn
+    criticalAttributes: ["process.executable.name", "process.command_line"] # Required attributes
 
 ## PII protection configuration
 ##

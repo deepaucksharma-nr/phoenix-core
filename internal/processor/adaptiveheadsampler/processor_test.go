@@ -32,7 +32,7 @@ func TestProcessorNoSampling(t *testing.T) {
 		BuildInfo: component.BuildInfo{},
 	}
 	
-	proc, err := newProcessor(set, cfg, sink)
+	proc, err := newTracesProcessor(set, cfg, sink)
 	require.NoError(t, err)
 	
 	// Create a simple trace with one span
@@ -64,7 +64,7 @@ func TestProcessorFullSampling(t *testing.T) {
 		BuildInfo: component.BuildInfo{},
 	}
 	
-	proc, err := newProcessor(set, cfg, sink)
+	proc, err := newTracesProcessor(set, cfg, sink)
 	require.NoError(t, err)
 	
 	// Create a simple trace with one span
@@ -97,7 +97,7 @@ func TestProcessorPartialSampling(t *testing.T) {
 		BuildInfo: component.BuildInfo{},
 	}
 	
-	proc, err := newProcessor(set, cfg, sink)
+	proc, err := newTracesProcessor(set, cfg, sink)
 	require.NoError(t, err)
 	
 	// Create 1000 traces to have a statistically significant sample
@@ -126,7 +126,7 @@ func TestSetProbability(t *testing.T) {
 		MaxP:               0.9,
 		HashSeedConfig:     "XORTraceID",
 	}
-	
+
 	sink := new(consumertest.TracesSink)
 	set := processor.CreateSettings{
 		TelemetrySettings: component.TelemetrySettings{
@@ -134,25 +134,99 @@ func TestSetProbability(t *testing.T) {
 		},
 		BuildInfo: component.BuildInfo{},
 	}
-	
-	proc, err := newProcessor(set, cfg, sink)
+
+	proc, err := newTracesProcessor(set, cfg, sink)
 	require.NoError(t, err)
-	
+
 	// Verify initial probability
-	p := proc.(*adaptiveHeadSamplerProcessor)
+	p := proc.(*adaptiveHeadSamplerTraceProcessor)
 	assert.Equal(t, 0.5, p.GetProbability())
-	
+
 	// Test setting probability within bounds
 	p.SetProbability(0.7)
 	assert.Equal(t, 0.7, p.GetProbability())
-	
+
 	// Test setting probability below min
 	p.SetProbability(0.05)
 	assert.Equal(t, 0.1, p.GetProbability(), "Probability should be clamped to min_p")
-	
+
 	// Test setting probability above max
 	p.SetProbability(1.0)
 	assert.Equal(t, 0.9, p.GetProbability(), "Probability should be clamped to max_p")
+}
+
+func TestTunableRegistryID(t *testing.T) {
+	// Test case 1: When TunableRegistryID is not specified, use the default
+	cfg1 := &Config{
+		InitialProbability: 0.5,
+		MinP:               0.1,
+		MaxP:               0.9,
+		HashSeedConfig:     "XORTraceID",
+		// TunableRegistryID is not set
+	}
+
+	sink := new(consumertest.TracesSink)
+	set := processor.CreateSettings{
+		TelemetrySettings: component.TelemetrySettings{
+			Logger: zap.NewNop(),
+		},
+		BuildInfo: component.BuildInfo{},
+	}
+
+	proc1, err := newTracesProcessor(set, cfg1, sink)
+	require.NoError(t, err)
+
+	// Verify default registry ID was used
+	p1 := proc1.(*adaptiveHeadSamplerTraceProcessor)
+	assert.Equal(t, "adaptive_head_sampler_traces", p1.registryID)
+
+	// Test case 2: When TunableRegistryID is specified, use it
+	cfg2 := &Config{
+		InitialProbability: 0.5,
+		MinP:               0.1,
+		MaxP:               0.9,
+		HashSeedConfig:     "XORTraceID",
+		TunableRegistryID:  "custom_sampler_id",
+	}
+
+	proc2, err := newTracesProcessor(set, cfg2, sink)
+	require.NoError(t, err)
+
+	// Verify custom registry ID was used
+	p2 := proc2.(*adaptiveHeadSamplerTraceProcessor)
+	assert.Equal(t, "custom_sampler_id", p2.registryID)
+
+	// Test case 3: Test logs processor with default ID
+	cfg3 := &Config{
+		InitialProbability: 0.5,
+		MinP:               0.1,
+		MaxP:               0.9,
+		HashSeedConfig:     "RecordID",
+		RecordIDFields:     []string{"test_field"},
+		// TunableRegistryID is not set
+	}
+
+	logProcessor, err := newLogsProcessor(set, cfg3)
+	require.NoError(t, err)
+
+	// Verify default registry ID was used for logs
+	assert.Equal(t, "adaptive_head_sampler_logs", logProcessor.registryID)
+
+	// Test case 4: Test logs processor with custom ID
+	cfg4 := &Config{
+		InitialProbability: 0.5,
+		MinP:               0.1,
+		MaxP:               0.9,
+		HashSeedConfig:     "RecordID",
+		RecordIDFields:     []string{"test_field"},
+		TunableRegistryID:  "custom_log_sampler_id",
+	}
+
+	logProcessor2, err := newLogsProcessor(set, cfg4)
+	require.NoError(t, err)
+
+	// Verify custom registry ID was used for logs
+	assert.Equal(t, "custom_log_sampler_id", logProcessor2.registryID)
 }
 
 // Helper function to create test traces

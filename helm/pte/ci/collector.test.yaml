@@ -1,0 +1,143 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
+  
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      process:
+        mute_process_user_error: true
+        include_process_command_line: true
+        mute_process_command_line_error: true
+        include_process_command_line_args: true
+        mute_process_command_line_args_error: true
+        include_process_memory_usage: true
+        mute_process_memory_usage_error: true
+        include_process_cpu_utilization: true
+        mute_process_cpu_utilization_error: true
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  k8sattributes:
+    auth_type: serviceAccount
+    passthrough: false
+    filter:
+      node_from_env_var: KUBE_NODE_NAME
+    extract:
+      metadata:
+        - k8s.pod.name
+        - k8s.namespace.name
+        - k8s.pod.uid
+        - k8s.deployment.name
+
+  resource:
+    attributes:
+      - key: service.name
+        value: pte
+        action: upsert
+      - key: telemetry.sdk.name
+        value: pte
+        action: upsert
+
+  fallback_proc_parser:
+    enabled: true
+    attributes_to_fetch: ["command_line", "owner", "io"]
+    strict_mode: false
+    critical_attributes: ["process.executable.name", "process.command_line"]
+
+  transform/process_normalize:
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Create process.display_name from executable and command line
+          - set(resource.attributes["process.display_name"], 
+              Concat([resource.attributes["process.executable.name"], " ", 
+                Trunc(resource.attributes["process.command_line"], 50)], ""))
+            where IsMatch(resource.attributes["process.executable.name"], ".+") and
+                  IsMatch(resource.attributes["process.command_line"], ".+")
+          
+          # Create simplified display name for Java processes
+          - set(resource.attributes["process.display_name"], 
+              RegexReplace(resource.attributes["process.command_line"], "^.*-jar\\s+([^\\s]+).*$", "java -jar $1"))
+            where IsMatch(resource.attributes["process.executable.name"], "^java$") and
+                  RegexMatch(resource.attributes["process.command_line"], "-jar\\s+[^\\s]+")
+          
+          # Create process.group from owner
+          - set(resource.attributes["process.group"], resource.attributes["process.owner"])
+            where IsMatch(resource.attributes["process.owner"], ".+")
+    
+  transform/drop_pid_attr:
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Remove process.pid attribute to reduce cardinality
+          - delete_key(resource.attributes, "process.pid")
+    
+  topn_process_metrics_filter:
+    top_n: 50
+    cpu_threshold: 0.01
+    memory_threshold: 50
+    idle_ttl: 300s
+    max_pids_to_scan_per_scrape: 5000
+    tunable_registry_id: "proc_top_n"
+
+  adaptive_head_sampler:
+    initial_probability: 0.25
+    min_p: 0.01
+    max_p: 1.0
+    hash_seed_config: "XORTraceID"
+
+  reservoir_sampler:
+    size_k: 5000
+    window_duration: 60s
+    checkpoint_path: "/data/pte/reservoir_state.db"
+    checkpoint_interval: 10s
+
+  batch:
+    send_batch_size: 1024
+    timeout: 10s
+
+exporters:
+  otlphttp/newrelic_default:
+    endpoint: "https://otlp.nr-data.net:4318"
+    headers:
+      api-key: "${NEW_RELIC_LICENSE_KEY}"
+    sending_queue:
+      enabled: true
+      storage: file_storage/export_queue
+
+service:
+  pipelines:
+    traces/default:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - k8sattributes
+        - resource
+        - adaptive_head_sampler
+        - reservoir_sampler
+        - batch
+      exporters:
+        - otlphttp/newrelic_default
+        
+    metrics/hostprocesses:
+      receivers: [hostmetrics]
+      processors:
+        - memory_limiter
+        - k8sattributes
+        - resource
+        - fallback_proc_parser
+        - transform/process_normalize
+        - topn_process_metrics_filter
+        - transform/drop_pid_attr
+        - batch
+      exporters:
+        - otlphttp/newrelic_default

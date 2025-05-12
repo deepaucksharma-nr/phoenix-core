@@ -112,7 +112,7 @@ data:
         memory_threshold: ${PTE_PROCESS_MEMORY_THRESHOLD}
         idle_ttl: ${PTE_PROCESS_IDLE_TTL}
         max_pids_to_scan_per_scrape: ${PTE_PROCESS_MAX_PIDS}
-        registry_id: "proc_top_n"
+        tunable_registry_id: "proc_top_n"
       {{- end }}
 
       adaptive_head_sampler:
@@ -204,8 +204,6 @@ data:
         metrics_endpoint: "http://localhost:{{ .Values.monitoring.prometheus.port }}/metrics"
         exporter_names: ["otlphttp/newrelic_default"]
         tunable_registry_id: "adaptive_head_sampler"
-        # Deprecated: Use tunable_registry_id instead
-        # sampler_registry_id: "adaptive_head_sampler"
       {{- end }}
 
     service:

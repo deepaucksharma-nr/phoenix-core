@@ -45,3 +45,5 @@ modules:
     import: github.com/deepaucksharma-nr/phoenix-core/internal/processor/reservoirsampler
   - module: github.com/deepaucksharma-nr/phoenix-core/internal/processor/topnprocfilter
     import: github.com/deepaucksharma-nr/phoenix-core/internal/processor/topnprocfilter
+  - module: github.com/deepaucksharma-nr/phoenix-core/internal/processor/fallbackprocparser
+    import: github.com/deepaucksharma-nr/phoenix-core/internal/processor/fallbackprocparser

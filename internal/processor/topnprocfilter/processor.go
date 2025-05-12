@@ -160,7 +160,11 @@ func newProcessor(set processorCreateSettings, config *Config) (*topNProcessor, 
 
 // ID implements the Tunable interface
 func (tp *topNProcessor) ID() string {
-	return tp.config.RegistryID
+	// Ensure we have a valid ID even if TunableRegistryID is not set
+	if tp.config.TunableRegistryID == "" {
+		return "proc_top_n" // Default ID if not specified
+	}
+	return tp.config.TunableRegistryID
 }
 
 // SetValue implements the Tunable interface
@@ -520,41 +524,53 @@ func (tp *topNProcessor) periodicCleanup(idleTTL time.Duration) {
 	ticker := time.NewTicker(idleTTL / 2)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		now := time.Now()
+	for {
+		select {
+		case <-ticker.C:
+			tp.runCleanupCycle(idleTTL)
+		case <-tp.stopCh:
+			return
+		}
+	}
+}
 
-		// Cleanup processes that haven't been above threshold for idleTTL
-		var toRemove []string
-		var processChanged bool
+// runCleanupCycle performs a single cleanup cycle
+// This is extracted to make testing easier and avoid test timeouts
+// The main periodicCleanup function calls this in a loop with a ticker, but tests can call it directly
+func (tp *topNProcessor) runCleanupCycle(idleTTL time.Duration) {
+	now := time.Now()
 
-		tp.processes.Range(func(key, value interface{}) bool {
-			pid := key.(string)
-			proc := value.(*processMetric)
+	// Cleanup processes that haven't been above threshold for idleTTL
+	var toRemove []string
+	var processChanged bool
 
-			// Check last time process was above threshold
-			// Convert Unix timestamp to time.Time for comparison
-			lastAboveThreshold := time.Unix(proc.LastAboveThresholdUnix, 0)
-			if now.Sub(lastAboveThreshold) > idleTTL {
-				toRemove = append(toRemove, pid)
-				processChanged = true
-			}
+	tp.processes.Range(func(key, value interface{}) bool {
+		pid := key.(string)
+		proc := value.(*processMetric)
 
-			return true
-		})
-
-		// Remove stale processes
-		for _, pid := range toRemove {
-			tp.processes.Delete(pid)
+		// Check last time process was above threshold
+		// Convert Unix timestamp to time.Time for comparison
+		lastAboveThreshold := time.Unix(proc.LastAboveThresholdUnix, 0)
+		if now.Sub(lastAboveThreshold) > idleTTL {
+			toRemove = append(toRemove, pid)
+			processChanged = true
 		}
 
-		// Invalidate cache if processes changed
-		if processChanged {
-			tp.invalidateTopNCache()
-		}
+		return true
+	})
 
-		if len(toRemove) > 0 {
-			tp.logger.Debug("Cleaned up idle processes",
-				zap.Int("removed_count", len(toRemove)))
-		}
+	// Remove stale processes
+	for _, pid := range toRemove {
+		tp.processes.Delete(pid)
+	}
+
+	// Invalidate cache if processes changed
+	if processChanged {
+		tp.invalidateTopNCache()
+	}
+
+	if len(toRemove) > 0 {
+		tp.logger.Debug("Cleaned up idle processes",
+			zap.Int("removed_count", len(toRemove)))
 	}
 }

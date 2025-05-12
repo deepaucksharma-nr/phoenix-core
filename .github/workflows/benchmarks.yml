@@ -1,0 +1,167 @@
+name: Performance Benchmarks
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'internal/processor/**'
+      - '.github/workflows/benchmarks.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'internal/processor/**'
+  workflow_dispatch:
+    inputs:
+      component:
+        description: 'Component to benchmark (empty for all)'
+        required: false
+        default: ''
+      custom_flags:
+        description: 'Custom benchmark flags'
+        required: false
+        default: '-benchtime=1s'
+
+jobs:
+  benchmark:
+    name: Run Go Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.19'
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
+          
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas matplotlib numpy
+
+      - name: Determine benchmark path
+        id: benchmark_path
+        run: |
+          # Default to running all processor benchmarks if no component specified
+          COMPONENT="${{ github.event.inputs.component }}"
+          if [ -z "$COMPONENT" ]; then
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              # For PRs, try to determine which components were modified
+              MODIFIED_PATHS=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E "^internal/processor/[^/]+/")
+              if [ -n "$MODIFIED_PATHS" ]; then
+                # Extract unique component names
+                COMPONENTS=$(echo "$MODIFIED_PATHS" | awk -F '/' '{print $3}' | sort | uniq)
+                # If fallbackprocparser was modified, prioritize testing it
+                if echo "$COMPONENTS" | grep -q "fallbackprocparser"; then
+                  COMPONENT="fallbackprocparser"
+                else
+                  # Take the first component for now
+                  COMPONENT=$(echo "$COMPONENTS" | head -n 1)
+                fi
+              fi
+            fi
+            
+            # Default if we still don't have a component
+            if [ -z "$COMPONENT" ]; then
+              COMPONENT="fallbackprocparser"
+            fi
+          fi
+          
+          echo "Running benchmarks for component: $COMPONENT"
+          echo "component=$COMPONENT" >> $GITHUB_OUTPUT
+          echo "benchmark_path=./internal/processor/$COMPONENT" >> $GITHUB_OUTPUT
+
+      - name: Run benchmarks
+        id: run_benchmarks
+        run: |
+          BENCH_FLAGS="${{ github.event.inputs.custom_flags }}"
+          if [ -z "$BENCH_FLAGS" ]; then
+            BENCH_FLAGS="-benchtime=2s"
+          fi
+          
+          # Create output directory
+          mkdir -p benchmark_results
+          
+          # Run benchmarks and save output
+          cd ${{ steps.benchmark_path.outputs.benchmark_path }}
+          go test -bench=. $BENCH_FLAGS -benchmem > ../../../benchmark_results/benchmark_output.txt
+          
+          echo "Benchmark results saved to benchmark_results/benchmark_output.txt"
+          
+          # Check if we're running fallbackprocparser benchmarks
+          if [[ "${{ steps.benchmark_path.outputs.component }}" == "fallbackprocparser" ]]; then
+            # Check if there are any cache efficiency benchmarks to run (these are more intensive)
+            if grep -q "BenchmarkCacheEfficiency" *.go; then
+              echo "Running cache efficiency benchmarks..."
+              go test -bench=BenchmarkCacheEfficiency -benchtime=1s -benchmem > ../../../benchmark_results/cache_benchmark_output.txt
+            fi
+          fi
+
+      - name: Generate benchmark report
+        if: steps.benchmark_path.outputs.component == 'fallbackprocparser'
+        run: |
+          cd tests/benchmarks
+          python analyze_fallbackprocparser.py --input ../../benchmark_results/benchmark_output.txt --output ../../benchmark_results/report
+          
+          # Combine results if we have separate cache benchmark results
+          if [ -f "../../benchmark_results/cache_benchmark_output.txt" ]; then
+            cat ../../benchmark_results/cache_benchmark_output.txt >> ../../benchmark_results/benchmark_output.txt
+            # Regenerate report with combined results
+            python analyze_fallbackprocparser.py --input ../../benchmark_results/benchmark_output.txt --output ../../benchmark_results/report
+          fi
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v2
+        with:
+          name: benchmark-results-${{ steps.benchmark_path.outputs.component }}
+          path: benchmark_results/
+
+      - name: Compare benchmarks (PR only)
+        if: github.event_name == 'pull_request'
+        run: |
+          # If this is a PR, we want to compare against the main branch
+          # This requires benchstat or a similar tool
+          go install golang.org/x/perf/cmd/benchstat@latest
+          
+          # Clone the main branch to compare
+          git clone --depth 1 --branch main https://github.com/${{ github.repository }}.git main-branch
+          
+          # Run the same benchmarks on the main branch
+          cd main-branch/${{ steps.benchmark_path.outputs.benchmark_path }}
+          go test -bench=. -benchtime=1s -benchmem > /tmp/main_benchmark.txt
+          
+          # Compare results
+          cd ../..
+          echo "## Benchmark Comparison" > benchmark_comparison.md
+          echo "Comparing PR #${{ github.event.pull_request.number }} against main branch" >> benchmark_comparison.md
+          echo '```' >> benchmark_comparison.md
+          $(go env GOPATH)/bin/benchstat /tmp/main_benchmark.txt benchmark_results/benchmark_output.txt >> benchmark_comparison.md
+          echo '```' >> benchmark_comparison.md
+          
+          # Add comment to PR with benchmark comparison
+          if [ -s benchmark_comparison.md ]; then
+            echo "Adding benchmark comparison to PR..."
+            cat benchmark_comparison.md
+          fi
+
+      - name: Comment PR with benchmark results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const comparison = fs.readFileSync('benchmark_comparison.md', 'utf8');
+            const prNumber = context.issue.number;
+            
+            github.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comparison
+            });

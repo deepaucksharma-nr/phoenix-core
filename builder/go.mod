@@ -23,4 +23,4 @@ replace github.com/deepaucksharma-nr/phoenix-core/internal/extension/pidcontroll
 replace github.com/deepaucksharma-nr/phoenix-core/internal/processor/adaptiveheadsampler => ../internal/processor/adaptiveheadsampler
 replace github.com/deepaucksharma-nr/phoenix-core/internal/processor/reservoirsampler => ../internal/processor/reservoirsampler
 replace github.com/deepaucksharma-nr/phoenix-core/internal/processor/topnprocfilter => ../internal/processor/topnprocfilter
-replace github.com/deepaucksharma-nr/phoenix-core/internal/pkg/samplerregistry => ../internal/pkg/samplerregistry
+replace github.com/deepaucksharma-nr/phoenix-core/internal/pkg/tunableregistry => ../internal/pkg/tunableregistry

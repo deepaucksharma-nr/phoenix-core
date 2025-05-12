@@ -45,6 +45,9 @@ help:
 	@echo "  docker-build    : Build the Docker image"
 	@echo "  docker-push     : Push the Docker image to registry"
 	@echo "  clean           : Clean build artifacts"
+	@echo "  bench           : Run all benchmarks"
+	@echo "  bench-fallbackprocparser : Run fallback process parser benchmarks and generate report"
+	@echo "  bench-[component] : Run benchmarks for a specific component"
 
 # Build the collector binary
 build:
@@ -68,7 +71,7 @@ test-unit:
 
 # Run integration tests
 test-integration:
-	$(GO_TEST) $(GO_TEST_FLAGS) ./tests/integration/...
+	$(GO_TEST) $(GO_TEST_FLAGS) ./tests/integration/... ./integration/...
 
 # Run end-to-end tests
 test-e2e:
@@ -90,6 +93,18 @@ test-statistical:
 # Run performance benchmarks
 bench:
 	$(GO_TEST) -benchmem -run=^$$ -bench . ./internal/processor/...
+
+# Run specific component benchmarks
+bench-%:
+	$(GO_TEST) -benchmem -run=^$$ -bench . ./internal/processor/$*/...
+
+# Run fallback process parser benchmarks
+bench-fallbackprocparser:
+	$(GO_TEST) -benchmem -run=^$$ -bench . ./internal/processor/fallbackprocparser/...
+	mkdir -p benchmark_results
+	$(GO_TEST) -benchmem -run=^$$ -bench . ./internal/processor/fallbackprocparser/... > benchmark_results/benchmark_output.txt
+	python tests/benchmarks/analyze_fallbackprocparser.py --input benchmark_results/benchmark_output.txt --output benchmark_results/report
+	@echo "Benchmark report generated at benchmark_results/report/benchmark_report.html"
 
 # Run all verification tasks
 verify: lint test helm-lint

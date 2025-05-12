@@ -22,8 +22,8 @@ type Config struct {
 	// Format is a duration string (e.g., "5m" for 5 minutes)
 	IdleTTL string `mapstructure:"idle_ttl"`
 
-	// RegistryID is the ID to use when registering as a tunable with the registry
-	RegistryID string `mapstructure:"registry_id"`
+	// TunableRegistryID is the ID to use when registering as a tunable with the registry
+	TunableRegistryID string `mapstructure:"tunable_registry_id"`
 
 	// MetricsReportingInterval is how often to report processor metrics
 	// Format is a duration string (e.g., "10s" for 10 seconds)
@@ -59,6 +59,10 @@ func (cfg *Config) Validate() error {
 		}
 	}
 
+	// We're not enforcing TunableRegistryID validation during the transition period
+	// as some tests might still be using the old field. The processor.ID() method
+	// provides a default fallback value if the field is empty.
+
 	// Validate metrics reporting configuration
 	if cfg.MetricsReportingInterval != "" {
 		_, err := time.ParseDuration(cfg.MetricsReportingInterval)
@@ -85,7 +89,7 @@ func createDefaultConfig() component.Config {
 		CPUThreshold:             0.01, // 1% CPU usage
 		MemoryThreshold:          0.01, // 1% memory usage
 		IdleTTL:                  "5m", // 5 minutes
-		RegistryID:               "proc_top_n",
+		TunableRegistryID:        "proc_top_n",
 		MetricsReportingInterval: "10s",
 		MetricsBatchSize:         10,
 		MetricsBufferSize:        100,

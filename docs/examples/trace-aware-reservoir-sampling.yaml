@@ -1,0 +1,75 @@
+# Example configuration for trace-aware reservoir sampling in Phoenix Telemetry Edge (PTE)
+# This demonstrates how to configure the reservoir_sampler processor with trace-aware sampling enabled.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  # Standard reservoir sampler configuration - each span sampled individually
+  reservoir_sampler/simple:
+    size_k: 5000                        # Size of the reservoir (number of spans to keep)
+    window_duration: "60s"              # Window duration for the sampler
+    checkpoint_path: "/data/pte/reservoir_standard.db"  # Path to persistent storage
+    checkpoint_interval: "10s"          # How often to save state
+    tunable_registry_id: "reservoir_sampler_simple"  # Custom registry ID
+    trace_aware: false                  # Explicitly disable trace-aware sampling
+
+  # Trace-aware reservoir sampler configuration 
+  # This keeps spans from the same trace together in the sample
+  reservoir_sampler/trace_aware:
+    size_k: 5000                        # Size of the reservoir (number of traces to keep)
+    window_duration: "60s"              # Window duration for the sampler
+    checkpoint_path: "/data/pte/reservoir_traceaware.db"  # Path to persistent storage
+    checkpoint_interval: "10s"          # How often to save state
+    tunable_registry_id: "reservoir_sampler_traceaware"  # Custom registry ID
+    trace_aware: true                   # Enable trace-aware sampling
+    trace_timeout: "5s"                 # Max time to wait for a trace to complete
+
+exporters:
+  otlp:
+    endpoint: ingest.otel.example.com:4317
+    tls:
+      insecure: false
+
+  logging:
+    verbosity: detailed
+
+service:
+  pipelines:
+    # Standard sampling pipeline
+    traces/standard:
+      receivers: [otlp]
+      processors: [batch, reservoir_sampler/simple]
+      exporters: [otlp, logging]
+
+    # Trace-aware sampling pipeline  
+    traces/trace_aware:
+      receivers: [otlp]
+      processors: [batch, reservoir_sampler/trace_aware]
+      exporters: [otlp, logging]
+
+  telemetry:
+    logs:
+      level: info
+
+# Typical use cases for each pipeline:
+#
+# 1. Standard Pipeline (traces/standard)
+#    - Lower memory overhead (no buffering of traces)
+#    - Higher throughput for very high volume systems
+#    - Acceptable when partial traces are sufficient for analysis
+#
+# 2. Trace-Aware Pipeline (traces/trace_aware)
+#    - Better representation of complete traces
+#    - More useful for distributed tracing analysis
+#    - Improved context preservation (parent-child relationships)
+#    - Better for debugging and performance analysis
