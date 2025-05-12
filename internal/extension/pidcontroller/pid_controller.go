@@ -81,6 +81,12 @@ func newPIDController(settings extension.CreateSettings, config component.Config
 		return nil, fmt.Errorf("failed to initialize metrics: %w", err)
 	}
 
+	// Determine which registry ID to log
+	registryID := cfg.TunableRegistryID
+	if registryID == "" {
+		registryID = cfg.SamplerRegistryID // Fallback to deprecated field
+	}
+
 	controller.logger.Info("PID controller extension created",
 		zap.String("interval", cfg.Interval),
 		zap.Float64("target_high", cfg.TargetQueueUtilizationHigh),
@@ -90,7 +96,8 @@ func newPIDController(settings extension.CreateSettings, config component.Config
 		zap.Float64("ewma_alpha", cfg.EWMAAlpha),
 		zap.Float64("aggressive_drop_factor", cfg.AggressiveDropFactor),
 		zap.Int("aggressive_window", cfg.AggressiveDropWindowCount),
-		zap.Strings("exporters", cfg.ExporterNames))
+		zap.Strings("exporters", cfg.ExporterNames),
+		zap.String("tunable_registry_id", registryID))
 
 	return controller, nil
 }
@@ -242,10 +249,16 @@ func (pc *pidControllerExtension) runControlCycle() {
 	newEWMA := pc.config.EWMAAlpha*queueUtilization + (1-pc.config.EWMAAlpha)*oldEWMA
 	pc.ewma.Store(newEWMA)
 
+	// Determine which ID to use (prefer TunableRegistryID if available)
+	registryID := pc.config.TunableRegistryID
+	if registryID == "" {
+		registryID = pc.config.SamplerRegistryID // Fallback to deprecated field
+	}
+
 	// Look up the tunable
-	tunable, exists := pc.tunableRegistry.Lookup(pc.config.SamplerRegistryID)
+	tunable, exists := pc.tunableRegistry.Lookup(registryID)
 	if !exists {
-		pc.logger.Error("Failed to find tunable in registry", zap.String("id", pc.config.SamplerRegistryID))
+		pc.logger.Error("Failed to find tunable in registry", zap.String("id", registryID))
 		return
 	}
 
